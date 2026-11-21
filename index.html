@@ -183,6 +183,8 @@
     else if (pushTimer) push(true);
   });
   window.addEventListener('online', pull);
+  // Check for changes from other devices every 20 s while the app is on screen (~180 requests/hour, well under GitHub's 5000).
+  setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 20000);
 
   render();
   showSync('Syncing…');
