@@ -19,8 +19,12 @@
   li.done span { text-decoration:line-through; color:var(--muted); }
   li button { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
   form { display:flex; gap:8px; }
-  form input { flex:1; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  form input { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
   form button { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; }
+  #sync { margin-top:32px; padding-top:16px; border-top:1px solid color-mix(in srgb, var(--muted) 40%, transparent); font-size:14px; color:var(--muted); }
+  #sync p { margin:0 0 8px; }
+  [hidden] { display:none !important; }
+  .link { background:none; border:0; padding:0; color:var(--accent); font-size:14px; cursor:pointer; text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -33,49 +37,156 @@
     <input id="name" placeholder="Add a daily task…" aria-label="New task" required>
     <button>Add</button>
   </form>
+
+  <section id="sync">
+    <p id="sync-status"></p>
+    <form id="connect">
+      <input id="token" type="password" autocomplete="off" placeholder="Paste your GitHub key" aria-label="GitHub key">
+      <button>Connect</button>
+    </form>
+    <button id="disconnect" class="link">Turn off sync on this device</button>
+  </section>
 </main>
 <script>
-  // Everything is saved in this browser only (localStorage). Checkmarks are stored per day, so each new day starts unchecked.
-  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  const FILE = 'daily-checklist.json', API = 'https://api.github.com';
+  const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time; a function so it rolls over past midnight
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
-  const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
-  let tasks = load('tasks', ['Drink water', 'Exercise', 'Read 10 pages']);
-  let done = load('done-' + today, []);
+  const $ = id => document.getElementById(id);
 
-  document.getElementById('date').textContent =
-    new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+  // state = { tasks: [names], done: { 'YYYY-MM-DD': [names] } }
+  let state = load('state', null);
+  if (!state) { // carry over lists saved by the first version of the app
+    const done = {};
+    for (const k of Object.keys(localStorage)) if (k.startsWith('done-')) done[k.slice(5)] = load(k, []);
+    state = { tasks: load('tasks', ['Drink water', 'Exercise', 'Read 10 pages']), done };
+  }
+  const doneToday = () => state.done[today()] || [];
+
+  function change() {
+    localStorage.setItem('state', JSON.stringify(state));
+    localStorage.setItem('dirty', '1'); // has changes GitHub hasn't got yet
+    render();
+    schedulePush();
+  }
 
   function render() {
-    const list = document.getElementById('list');
+    $('date').textContent = new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+    const list = $('list');
     list.innerHTML = '';
-    tasks.forEach(t => {
+    state.tasks.forEach(t => {
       const li = document.createElement('li');
-      li.className = done.includes(t) ? 'done' : '';
+      const isDone = doneToday().includes(t);
+      li.className = isDone ? 'done' : '';
       li.innerHTML = '<label><input type="checkbox"><span></span></label><button aria-label="Delete">×</button>';
       li.querySelector('span').textContent = t; // textContent, so typed text can't inject HTML
       const box = li.querySelector('input');
-      box.checked = done.includes(t);
-      box.onchange = () => { done = box.checked ? [...done, t] : done.filter(x => x !== t); save('done-' + today, done); render(); };
+      box.checked = isDone;
+      box.onchange = () => {
+        state.done[today()] = box.checked ? [...doneToday(), t] : doneToday().filter(x => x !== t);
+        change();
+      };
       // Tap once to arm, tap again to delete (pop-up confirm() is blocked in some browsers/app views).
       const del = li.querySelector('button');
       del.onclick = () => {
         if (del.textContent !== 'Delete?') { del.textContent = 'Delete?'; del.style.color = '#c0392b'; del.style.fontSize = '15px'; return; }
-        tasks = tasks.filter(x => x !== t); save('tasks', tasks); render();
+        state.tasks = state.tasks.filter(x => x !== t); change();
       };
       list.appendChild(li);
     });
-    const n = tasks.filter(t => done.includes(t)).length;
-    document.getElementById('progress').textContent = tasks.length ? `${n} of ${tasks.length} done` + (n === tasks.length ? ' 🎉' : '') : 'No tasks yet.';
+    const n = state.tasks.filter(t => doneToday().includes(t)).length;
+    $('progress').textContent = state.tasks.length ? `${n} of ${state.tasks.length} done` + (n === state.tasks.length ? ' 🎉' : '') : 'No tasks yet.';
   }
 
-  document.getElementById('add').onsubmit = e => {
+  $('add').onsubmit = e => {
     e.preventDefault();
-    const input = document.getElementById('name');
-    const t = input.value.trim();
-    if (t && !tasks.includes(t)) { tasks.push(t); save('tasks', tasks); render(); }
-    input.value = '';
+    const t = $('name').value.trim();
+    if (t && !state.tasks.includes(t)) { state.tasks.push(t); change(); }
+    $('name').value = '';
   };
+
+  // ---- Sync through a private GitHub Gist. Last save wins if both devices edit at the same moment. ----
+  let token = localStorage.getItem('gh-token');
+  let gistId = localStorage.getItem('gist-id');
+  let pushTimer = null;
+
+  function showSync(msg) {
+    $('sync-status').textContent = token ? msg : 'Sync is off. Your list is saved on this device only.';
+    $('connect').hidden = !!token;
+    $('disconnect').hidden = !token;
+  }
+
+  async function gh(path, opts = {}) {
+    const r = await fetch(API + path, { ...opts, cache: 'no-store',
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' } });
+    if (r.status === 401) throw new Error('GitHub did not accept the key (it may have expired). Turn off sync and connect with a new key.');
+    if (r.status === 404 && path.startsWith('/gists/')) { gistId = null; localStorage.removeItem('gist-id'); }
+    if (!r.ok) throw new Error('GitHub error ' + r.status);
+    return r.json();
+  }
+
+  async function findOrCreateGist() {
+    const mine = await gh('/gists?per_page=100');
+    const found = mine.find(g => g.files[FILE]);
+    if (found) { localStorage.removeItem('dirty'); return found.id; } // joining an existing list: GitHub's copy wins
+    const made = await gh('/gists', { method: 'POST', body: JSON.stringify({
+      description: 'Daily checklist data', public: false, files: { [FILE]: { content: JSON.stringify(state) } } }) });
+    localStorage.removeItem('dirty');
+    return made.id;
+  }
+
+  async function pull() {
+    if (!token || !navigator.onLine) return showSync('Offline. Changes will sync when you are back online.');
+    try {
+      showSync('Syncing…');
+      if (!gistId) { gistId = await findOrCreateGist(); localStorage.setItem('gist-id', gistId); }
+      if (localStorage.getItem('dirty')) return push(); // don't overwrite changes made offline
+      const g = await gh('/gists/' + gistId);
+      const remote = JSON.parse(g.files[FILE].content);
+      if (!Array.isArray(remote.tasks) || typeof remote.done !== 'object') throw new Error('Saved data looks broken');
+      state = remote;
+      localStorage.setItem('state', JSON.stringify(state));
+      render();
+      showSync('Synced with GitHub ✓');
+    } catch (e) { showSync('Sync problem: ' + e.message); }
+  }
+
+  async function push(keepalive = false) {
+    clearTimeout(pushTimer); pushTimer = null;
+    if (!token || !gistId) return pull();
+    try {
+      showSync('Saving…');
+      await gh('/gists/' + gistId, { method: 'PATCH', keepalive,
+        body: JSON.stringify({ files: { [FILE]: { content: JSON.stringify(state) } } }) });
+      localStorage.removeItem('dirty');
+      showSync('Synced with GitHub ✓');
+    } catch (e) { showSync('Sync problem: ' + e.message); }
+  }
+
+  function schedulePush() { if (token) { clearTimeout(pushTimer); pushTimer = setTimeout(push, 800); } }
+
+  $('connect').onsubmit = e => {
+    e.preventDefault();
+    const t = $('token').value.trim();
+    if (!t) return;
+    token = t; localStorage.setItem('gh-token', t); $('token').value = '';
+    pull();
+  };
+  $('disconnect').onclick = () => {
+    token = gistId = null;
+    localStorage.removeItem('gh-token'); localStorage.removeItem('gist-id');
+    showSync();
+  };
+
+  // Re-sync whenever the app comes back on screen; save right away if it is being closed.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { render(); pull(); }
+    else if (pushTimer) push(true);
+  });
+  window.addEventListener('online', pull);
+
   render();
+  showSync('Syncing…');
+  pull();
 </script>
 </body>
 </html>
