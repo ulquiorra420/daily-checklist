@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Daily Checklist</title>
+<style>
+  :root { --bg:#f6f6f3; --card:#fff; --text:#222; --muted:#888; --accent:#2f7d5b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161616; --card:#222; --text:#eee; --muted:#999; --accent:#5fc595; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:17px/1.4 -apple-system, system-ui, sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:24px 16px; }
+  h1 { margin:0; font-size:26px; }
+  #date, #progress { color:var(--muted); margin:4px 0 16px; }
+  ul { list-style:none; padding:0; margin:0 0 16px; }
+  li { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:12px; padding:14px; margin-bottom:8px; }
+  li label { flex:1; display:flex; gap:12px; align-items:center; cursor:pointer; }
+  li input { width:22px; height:22px; accent-color:var(--accent); }
+  li.done span { text-decoration:line-through; color:var(--muted); }
+  li button { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
+  form { display:flex; gap:8px; }
+  form input { flex:1; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  form button { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Today</h1>
+  <p id="date"></p>
+  <ul id="list"></ul>
+  <p id="progress"></p>
+  <form id="add">
+    <input id="name" placeholder="Add a daily task…" aria-label="New task" required>
+    <button>Add</button>
+  </form>
+</main>
+<script>
+  // Everything is saved in this browser only (localStorage). Checkmarks are stored per day, so each new day starts unchecked.
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+  let tasks = load('tasks', ['Drink water', 'Exercise', 'Read 10 pages']);
+  let done = load('done-' + today, []);
+
+  document.getElementById('date').textContent =
+    new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+
+  function render() {
+    const list = document.getElementById('list');
+    list.innerHTML = '';
+    tasks.forEach(t => {
+      const li = document.createElement('li');
+      li.className = done.includes(t) ? 'done' : '';
+      li.innerHTML = '<label><input type="checkbox"><span></span></label><button aria-label="Delete">×</button>';
+      li.querySelector('span').textContent = t; // textContent, so typed text can't inject HTML
+      const box = li.querySelector('input');
+      box.checked = done.includes(t);
+      box.onchange = () => { done = box.checked ? [...done, t] : done.filter(x => x !== t); save('done-' + today, done); render(); };
+      // Tap once to arm, tap again to delete (pop-up confirm() is blocked in some browsers/app views).
+      const del = li.querySelector('button');
+      del.onclick = () => {
+        if (del.textContent !== 'Delete?') { del.textContent = 'Delete?'; del.style.color = '#c0392b'; del.style.fontSize = '15px'; return; }
+        tasks = tasks.filter(x => x !== t); save('tasks', tasks); render();
+      };
+      list.appendChild(li);
+    });
+    const n = tasks.filter(t => done.includes(t)).length;
+    document.getElementById('progress').textContent = tasks.length ? `${n} of ${tasks.length} done` + (n === tasks.length ? ' 🎉' : '') : 'No tasks yet.';
+  }
+
+  document.getElementById('add').onsubmit = e => {
+    e.preventDefault();
+    const input = document.getElementById('name');
+    const t = input.value.trim();
+    if (t && !tasks.includes(t)) { tasks.push(t); save('tasks', tasks); render(); }
+    input.value = '';
+  };
+  render();
+</script>
+</body>
+</html>
