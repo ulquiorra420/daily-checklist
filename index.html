@@ -24,10 +24,15 @@
   #sync { margin-top:32px; padding-top:16px; border-top:1px solid color-mix(in srgb, var(--muted) 40%, transparent); font-size:14px; color:var(--muted); }
   #sync p { margin:0 0 8px; }
   [hidden] { display:none !important; }
+  #ptr { height:0; overflow:hidden; display:flex; justify-content:center; align-items:center; transition:height .2s; }
+  #ptr .spin { width:24px; height:24px; border:3px solid var(--muted); border-top-color:var(--accent); border-radius:50%; }
+  #ptr.loading .spin { animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .link { background:none; border:0; padding:0; color:var(--accent); font-size:14px; cursor:pointer; text-decoration:underline; }
 </style>
 </head>
 <body>
+<div id="ptr" aria-hidden="true"><div class="spin"></div></div>
 <main>
   <h1>Today</h1>
   <p id="date"></p>
@@ -45,6 +50,7 @@
       <button>Connect</button>
     </form>
     <button id="disconnect" class="link">Turn off sync on this device</button>
+    <p style="margin-top:12px">App version 4 · pull down to check for changes</p>
   </section>
 </main>
 <script>
@@ -185,6 +191,27 @@
   window.addEventListener('online', pull);
   // Check for changes from other devices every 20 s while the app is on screen (~180 requests/hour, well under GitHub's 5000).
   setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 20000);
+
+  // Pull to refresh: drag down from the top of the page and let go to check for changes now.
+  const ptr = $('ptr'), spin = ptr.firstElementChild;
+  let startY = null;
+  addEventListener('touchstart', e => { startY = scrollY <= 0 ? e.touches[0].clientY : null; ptr.style.transition = 'none'; }, { passive: true });
+  addEventListener('touchmove', e => {
+    if (startY === null) return;
+    const d = Math.max(0, e.touches[0].clientY - startY);
+    ptr.style.height = Math.min(d / 2, 70) + 'px';
+    spin.style.transform = `rotate(${d * 2}deg)`;
+  }, { passive: true });
+  addEventListener('touchend', async () => {
+    if (startY === null) return;
+    startY = null; ptr.style.transition = ''; spin.style.transform = '';
+    if (parseFloat(ptr.style.height) >= 60) {
+      ptr.classList.add('loading'); ptr.style.height = '50px';
+      await Promise.all([pull(), new Promise(r => setTimeout(r, 600))]); // keep the spinner visible long enough to see
+      ptr.classList.remove('loading');
+    }
+    ptr.style.height = '0';
+  });
 
   render();
   showSync('Syncing…');
