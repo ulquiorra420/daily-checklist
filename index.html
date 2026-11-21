@@ -50,11 +50,23 @@
       <button>Connect</button>
     </form>
     <button id="disconnect" class="link">Turn off sync on this device</button>
-    <p style="margin-top:12px">App version 4 · pull down to check for changes</p>
+    <p style="margin-top:12px">App version <span id="ver"></span> · pull down to check for changes</p>
   </section>
 </main>
 <script>
+  const VERSION = 5; // bump on every release so installed copies update themselves
   const FILE = 'daily-checklist.json', API = 'https://api.github.com';
+
+  // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
+  // version number; if it is newer, reload from a fresh address (?v=N) that has never been saved.
+  async function checkAppUpdate() {
+    try {
+      const html = await (await fetch('./?check=' + Date.now(), { cache: 'no-store' })).text();
+      const v = +(html.match(/const VERSION = (\d+)/) || [])[1];
+      if (v > VERSION && location.search !== '?v=' + v) location.replace('./?v=' + v);
+    } catch {} // offline: try again next time
+  }
+  checkAppUpdate();
   const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time; a function so it rolls over past midnight
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
   const $ = id => document.getElementById(id);
@@ -185,7 +197,7 @@
 
   // Re-sync whenever the app comes back on screen; save right away if it is being closed.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { render(); pull(); }
+    if (document.visibilityState === 'visible') { render(); pull(); checkAppUpdate(); }
     else if (pushTimer) push(true);
   });
   window.addEventListener('online', pull);
@@ -213,6 +225,7 @@
     ptr.style.height = '0';
   });
 
+  $('ver').textContent = VERSION;
   render();
   showSync('Syncing…');
   pull();
