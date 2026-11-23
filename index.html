@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><!-- stops iPhone auto-zooming into text boxes -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Daily Checklist</title>
 <style>
@@ -27,7 +27,8 @@
   input[type=text], input[type=password], input[type=time], select { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
   button.main { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; cursor:pointer; }
   .person { display:block; width:100%; text-align:left; font-size:20px; padding:18px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
-  #pin-input { font-size:32px; letter-spacing:16px; text-align:center; }
+  input, select, button { box-sizing:border-box; }
+  #pin-input { display:block; width:100%; font-size:32px; letter-spacing:16px; text-align:center; }
   .msg { min-height:1.4em; color:var(--danger); }
   .card label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
   .card select, .card input[type=time] { flex:0 0 auto; padding:8px; }
@@ -132,7 +133,7 @@
   </footer>
 </main>
 <script>
-  const VERSION = 7; // bump on every release so installed copies update themselves
+  const VERSION = 8; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
