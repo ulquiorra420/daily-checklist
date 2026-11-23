@@ -53,7 +53,19 @@
   #bar { position:fixed; top:0; bottom:0; left:0; width:78%; max-width:320px; background:var(--bg); z-index:11; padding:24px 16px; box-sizing:border-box;
          transform:translateX(-105%); transition:transform .25s; box-shadow:2px 0 16px rgba(0,0,0,.2); }
   #bar.open { transform:none; }
-  #bar button.item { display:block; width:100%; text-align:left; font-size:19px; padding:16px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
+  #bar button.item { display:flex; align-items:center; gap:12px; width:100%; text-align:left; font-size:19px; padding:16px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
+  /* every icon gets the same fixed box, so the words line up whatever the emoji's size */
+  #bar .ico { flex:0 0 28px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:22px; line-height:1; }
+  /* Usage */
+  .meter { height:14px; border-radius:7px; background:color-mix(in srgb, var(--muted) 25%, transparent); overflow:hidden; margin:12px 0 8px; }
+  .meter > div { height:100%; background:var(--accent); min-width:3px; }
+  .meter.full > div { background:var(--danger); }
+  /* Help */
+  .msg-card { background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex; gap:12px; align-items:flex-start; }
+  .msg-card .body { flex:1; min-width:0; }
+  .msg-card .text { white-space:pre-wrap; overflow-wrap:anywhere; margin:4px 0 0; }
+  .msg-card.solved .text { color:var(--muted); }
+  .msg-card input[type=checkbox] { width:24px; height:24px; flex:0 0 auto; accent-color:var(--accent); margin-top:2px; }
   /* Archive */
   .day-btn { display:flex; justify-content:space-between; width:100%; text-align:left; font-size:17px; padding:14px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:8px; cursor:pointer; }
   .day-btn:disabled { opacity:.45; cursor:default; }
@@ -79,8 +91,10 @@
 <div id="backdrop" hidden></div>
 <nav id="bar" aria-label="Menu" hidden>
   <p class="muted" id="bar-who" style="margin:0 0 16px"></p>
-  <button class="item" id="go-settings">⚙︎ <span data-t="settings"></span></button>
-  <button class="item" id="go-archive">🗂 <span data-t="archive"></span></button>
+  <button class="item" id="go-settings"><span class="ico" aria-hidden="true">⚙️</span><span data-t="settings"></span></button>
+  <button class="item" id="go-archive"><span class="ico" aria-hidden="true">🗂️</span><span data-t="archive"></span></button>
+  <button class="item" id="go-usage"><span class="ico" aria-hidden="true">📊</span><span data-t="usage"></span></button>
+  <button class="item" id="go-help"><span class="ico" aria-hidden="true">💬</span><span data-t="help"></span></button>
 </nav>
 
 <!-- "Moved to today" pop-up -->
@@ -208,13 +222,38 @@
     <p class="muted" id="day-legacy" style="font-size:14px" data-t="legacy"></p>
   </section>
 
+  <!-- 7. Usage -->
+  <section id="usage" hidden>
+    <button class="link back-today" data-t="backToday"></button>
+    <h1 data-t="usage" style="margin:16px 0"></h1>
+    <div class="card">
+      <div class="meter" id="usage-meter"><div></div></div>
+      <p id="usage-text" style="margin:0"></p>
+    </div>
+    <p class="muted" style="font-size:14px" data-t="usageInfo"></p>
+  </section>
+
+  <!-- 8. Help -->
+  <section id="help" hidden>
+    <button class="link back-today" data-t="backToday"></button>
+    <h1 data-t="help" style="margin:16px 0"></h1>
+    <form id="help-form" style="flex-direction:column">
+      <label for="help-text" data-t="helpPrompt"></label>
+      <textarea id="help-text" rows="4" maxlength="2000"></textarea>
+      <button class="main" data-t="send" style="align-self:flex-end"></button>
+    </form>
+    <p class="msg" id="help-msg" role="status"></p>
+    <h2 id="help-list-title"></h2>
+    <div id="help-list"></div>
+  </section>
+
   <footer>
     <p id="sync-status"></p>
     <p><span data-t="version"></span> <span id="ver"></span> · <span data-t="pullHint"></span></p>
   </footer>
 </main>
 <script>
-  const VERSION = 9; // bump on every release so installed copies update themselves
+  const VERSION = 10; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -253,6 +292,12 @@
       offline: 'Offline. Changes will sync when you are back online.', syncing: 'Syncing…', synced: 'Saved ✓',
       syncProblem: 'Could not reach the server. Will try again.', version: 'App version', pullHint: 'pull down to check for changes',
       signedInAs: n => `Signed in as ${n}`, starter: 'Drink water',
+      usage: 'Usage', usageText: (u, l, p) => `${u} of ${l} used (${p}%)`, usageShort: (u, p) => `${u} (${p}%)`,
+      usageInfo: 'Your lists, notes and Help messages are saved on the server. Each person has 5 MB, which is enough for many years of daily lists.',
+      storageFull: 'Storage full: nothing new can be saved. Please tell dannyle.',
+      help: 'Help', helpPrompt: 'Has any problem occurred, or would you like anything changed in this app?', send: 'Send',
+      helpSent: 'Sent ✓ dannyle will see it.', helpYours: 'Your messages', helpAll: 'Messages from family', helpNone: 'No messages yet.',
+      waiting: 'Waiting', solved: '✅ Solved', markSolved: 'Solved',
     },
     vi: {
       today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc…', del: 'Xoá?', sure: 'Chắc chưa?',
@@ -278,6 +323,12 @@
       offline: 'Mất mạng. Sẽ đồng bộ khi có mạng lại.', syncing: 'Đang đồng bộ…', synced: 'Đã lưu ✓',
       syncProblem: 'Không kết nối được máy chủ. Sẽ thử lại.', version: 'Phiên bản', pullHint: 'kéo xuống để cập nhật',
       signedInAs: n => `Đang dùng: ${n}`, starter: 'Uống nước',
+      usage: 'Dung lượng', usageText: (u, l, p) => `Đã dùng ${u} / ${l} (${p}%)`, usageShort: (u, p) => `${u} (${p}%)`,
+      usageInfo: 'Danh sách, ghi chú và tin nhắn trợ giúp của bạn được lưu trên máy chủ. Mỗi người có 5 MB, đủ dùng nhiều năm.',
+      storageFull: 'Hết dung lượng: không lưu thêm được. Hãy báo cho dannyle.',
+      help: 'Trợ giúp', helpPrompt: 'Ứng dụng có gặp vấn đề gì không, hoặc bạn muốn thay đổi điều gì?', send: 'Gửi',
+      helpSent: 'Đã gửi ✓ dannyle sẽ xem.', helpYours: 'Tin nhắn của bạn', helpAll: 'Tin nhắn từ gia đình', helpNone: 'Chưa có tin nhắn.',
+      waiting: 'Đang chờ', solved: '✅ Đã giải quyết', markSolved: 'Đã xong',
     },
   };
 
@@ -300,7 +351,9 @@
   let lang = me?.settings?.lang || (navigator.language.startsWith('vi') ? 'vi' : 'en');
   const t = k => T[lang][k];
 
-  const SCREENS = ['pick', 'pin', 'today', 'settings', 'archive', 'archive-day'];
+  const SCREENS = ['pick', 'pin', 'today', 'settings', 'archive', 'archive-day', 'usage', 'help'];
+  const fmtBytes = n => n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(2).replace(/\.?0+$/, '')} MB`;
+  const pct = (n, limit) => { const p = n / limit * 100; return p === 0 ? '0' : p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : Math.round(p); };
   function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; closeBar(); }
   const current = () => SCREENS.find(s => !$(s).hidden);
   function translate() {
@@ -548,7 +601,7 @@
       status(t('synced'));
     } catch (e) {
       if (e.message === 'day-is-archived') { localStorage.removeItem('dirty'); return pull(); } // another phone already moved on
-      status(navigator.onLine ? t('syncProblem') : t('offline'));
+      status(e.message === 'storage-full' ? t('storageFull') : navigator.onLine ? t('syncProblem') : t('offline'));
     }
   }
 
@@ -568,6 +621,64 @@
   $('backdrop').onclick = closeBar;
   $('go-settings').onclick = () => { renderSettings(); show('settings'); };
   $('go-archive').onclick = showArchive;
+  $('go-usage').onclick = showUsage;
+  $('go-help').onclick = showHelp;
+
+  // ---------- 7. Usage ----------
+  async function showUsage() {
+    show('usage');
+    $('usage-text').textContent = t('syncing');
+    try {
+      const { used, limit } = await api('/usage');
+      $('usage-meter').firstElementChild.style.width = Math.min(100, used / limit * 100) + '%';
+      $('usage-meter').classList.toggle('full', used >= limit * 0.9);
+      $('usage-text').textContent = t('usageText')(fmtBytes(used), fmtBytes(limit), pct(used, limit));
+    } catch { $('usage-text').textContent = navigator.onLine ? t('syncProblem') : t('offline'); }
+  }
+
+  // ---------- 8. Help ----------
+  // Everyone sends messages and sees their own; the admin sees everyone's and ticks them solved.
+  async function showHelp() {
+    show('help');
+    $('help-form').hidden = me.isAdmin;
+    $('help-list-title').textContent = t(me.isAdmin ? 'helpAll' : 'helpYours');
+    await renderHelp();
+  }
+  async function renderHelp() {
+    const box = $('help-list');
+    let msgs;
+    try { msgs = await api('/help'); } catch { $('help-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); return; }
+    box.textContent = '';
+    if (!msgs.length) { box.textContent = t('helpNone'); return; }
+    for (const m of msgs) {
+      const card = document.createElement('div');
+      card.className = 'msg-card' + (m.solved ? ' solved' : '');
+      card.innerHTML = '<div class="body"><div class="muted" style="font-size:14px"></div><p class="text"></p></div>';
+      const when = new Date(m.created).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      card.querySelector('.muted').textContent = (me.isAdmin ? m.name + ' · ' : '') + when + (me.isAdmin ? '' : ' · ' + t(m.solved ? 'solved' : 'waiting'));
+      card.querySelector('.text').textContent = m.text;
+      if (me.isAdmin) {
+        const box2 = document.createElement('input');
+        box2.type = 'checkbox'; box2.checked = m.solved; box2.setAttribute('aria-label', t('markSolved'));
+        box2.onchange = async () => {
+          try { await api('/admin/help-solved', 'POST', { id: m.id, solved: box2.checked }); } catch { box2.checked = !box2.checked; }
+          renderHelp();
+        };
+        card.prepend(box2);
+      }
+      box.appendChild(card);
+    }
+  }
+  $('help-form').onsubmit = async e => {
+    e.preventDefault();
+    const text = $('help-text').value.trim();
+    if (!text) return;
+    try {
+      await api('/help', 'POST', { text });
+      $('help-text').value = ''; $('help-msg').textContent = t('helpSent');
+      renderHelp();
+    } catch (err) { $('help-msg').textContent = err.message === 'storage-full' ? t('storageFull') : navigator.onLine ? t('syncProblem') : t('offline'); }
+  };
 
   // ---------- 5/6. Archive ----------
   async function showArchive() {
@@ -690,13 +801,17 @@
   // ---------- admin ----------
   async function renderAdmin() {
     const box = $('admin-people');
-    try { people = await api('/people'); } catch { return; }
+    let usage;
+    try { [people, usage] = await Promise.all([api('/people'), api('/admin/usage')]); } catch { return; }
     box.textContent = '';
     for (const p of people) {
       const row = document.createElement('div');
       row.className = 'row between'; row.style.margin = '8px 0';
-      row.innerHTML = '<span></span><span class="row" style="gap:16px"><button class="link"></button><button class="link danger"></button></span>';
-      row.querySelector('span').textContent = p.name;
+      row.innerHTML = '<span><span></span> <span class="muted" style="font-size:14px"></span></span><span class="row" style="gap:16px"><button class="link"></button><button class="link danger"></button></span>';
+      const [nameEl, useEl] = row.firstChild.children;
+      nameEl.textContent = p.name;
+      const used = usage.people[p.id] || 0;
+      useEl.textContent = t('usageShort')(fmtBytes(used), pct(used, usage.limit));
       const [reset, remove] = row.querySelectorAll('button');
       reset.textContent = t('resetPin');
       armedButton(reset, t('sure'), async () => { await api('/admin/reset-pin', 'POST', { id: p.id }); $('admin-msg').textContent = t('resetDone')(p.name); renderAdmin(); });

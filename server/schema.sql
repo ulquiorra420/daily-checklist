@@ -7,10 +7,24 @@ CREATE TABLE IF NOT EXISTS people (
   salt TEXT,
   failed INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER NOT NULL DEFAULT 0,
-  data TEXT NOT NULL,          -- {"days":{"YYYY-MM-DD":{tasks:[{text,done,repeat}],notes:[...]}},"popupShown":date}
+  data TEXT NOT NULL,          -- {"popupShown":date}
   settings TEXT NOT NULL,      -- {"lang","tz","water":{on,every,from,to},"summary":{on,time},"morning":{on,time}}
   last_summary TEXT,           -- local date the 'still to do' reminder was last sent
   last_morning TEXT            -- local date the 10am 'moved to today' reminder was last sent
+);
+-- One row per person per day (keeps each row far below D1's 2 MB limit).
+CREATE TABLE IF NOT EXISTS days (
+  person_id TEXT NOT NULL,
+  date TEXT NOT NULL,          -- YYYY-MM-DD in the person's time zone
+  day TEXT NOT NULL,           -- {"tasks":[{text,done,repeat}],"notes":[...],"carried":[...],"from":date}
+  PRIMARY KEY (person_id, date)
+);
+CREATE TABLE IF NOT EXISTS help (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  person_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created INTEGER NOT NULL,
+  solved INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,

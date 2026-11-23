@@ -7,9 +7,13 @@ const EVERY_OPTIONS = [15, 30, 45, 60, 90, 120];
 
 const TEXT = {
   en: { waterTitle: '💧 Time to drink water', waterBody: 'Have a glass of water.', summaryTitle: '📝 Still to do today', testTitle: 'Notifications are working ✓', testBody: 'You will get your reminders here.',
-        morningTitle: '⏩ Moved to today', morningBody: (from, yesterday, list) => `Not finished ${from === yesterday ? 'yesterday' : 'on ' + from}: ${list}` },
+        morningTitle: '⏩ Moved to today', morningBody: (from, yesterday, list) => `Not finished ${from === yesterday ? 'yesterday' : 'on ' + from}: ${list}`,
+        helpNewTitle: name => `📩 Help message from ${name}`, helpSolvedTitle: '✅ Your request was solved',
+        helpSolvedBody: 'Please pull down to refresh the app so the changes take effect.' },
   vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.',
-        morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}` },
+        morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}`,
+        helpNewTitle: name => `📩 Tin nhắn trợ giúp từ ${name}`, helpSolvedTitle: '✅ Yêu cầu của bạn đã được giải quyết',
+        helpSolvedBody: 'Hãy kéo xuống để làm mới ứng dụng và nhận thay đổi.' },
 };
 
 export const defaultSettings = lang => ({
@@ -19,10 +23,10 @@ export const defaultSettings = lang => ({
   morning: { on: true, time: '10:00' },
 });
 // A new person has no days yet; the app adds their first "Drink water" task on first open.
-export const starterData = () => ({ days: {} });
+export const starterData = () => ({});
 
-// data = { days: { 'YYYY-MM-DD': Day }, popupShown?: date }
-// Day  = { tasks: [{ text, done, repeat }], notes: [text], carried?: [text], from?: date, legacy?: true }
+// people.data = { popupShown?: date }; each day is its own row in the days table:
+// Day = { tasks: [{ text, done, repeat }], notes: [text], carried?: [text], from?: date, legacy?: true }
 // The app creates each new day the same way (keep in sync with newDay() in index.html).
 export function newDay(days, date) {
   const prevKey = Object.keys(days).filter(d => d < date).sort().pop();
@@ -99,32 +103,57 @@ async function route(req, env) {
   const me = token && await db.prepare('SELECT p.* FROM sessions s JOIN people p ON p.id = s.person_id WHERE s.token = ?').bind(token).first();
   if (!me) throw new HttpError(401, 'signed-out');
 
-  const data = JSON.parse(me.data);
-  const saveData = () => db.prepare('UPDATE people SET data = ? WHERE id = ?').bind(JSON.stringify(data), me.id).run();
+  const data = JSON.parse(me.data); // { popupShown }
   if (m === 'GET' && p === '/me') {
-    const recent = Object.fromEntries(Object.keys(data.days).sort().slice(-2).map(d => [d, data.days[d]]));
-    return { id: me.id, name: me.name, isAdmin: !!me.is_admin, settings: JSON.parse(me.settings), recent, popupShown: data.popupShown || null };
+    return { id: me.id, name: me.name, isAdmin: !!me.is_admin, settings: JSON.parse(me.settings),
+      recent: await recentDays(db, me.id), popupShown: data.popupShown || null };
   }
+  if (m === 'GET' && p === '/usage') return { used: await usage(db, me.id), limit: USAGE_LIMIT };
   if (m === 'PUT' && p === '/day') { // only the newest day can change; older days are the read-only Archive
     const date = String(body.date);
-    const newest = Object.keys(data.days).sort().pop();
+    const { newest } = await db.prepare('SELECT MAX(date) AS newest FROM days WHERE person_id = ?').bind(me.id).first();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || (newest && date < newest)) throw new HttpError(400, 'day-is-archived');
-    data.days[date] = cleanDay(body.day);
-    if (JSON.stringify(data).length > 1_500_000) throw new HttpError(413, 'too-much-data');
-    await saveData();
+    const json = JSON.stringify(cleanDay(body.day));
+    const old = await db.prepare('SELECT length(CAST(day AS BLOB)) AS n FROM days WHERE person_id = ? AND date = ?').bind(me.id, date).first();
+    if (await usage(db, me.id) - (old?.n || 0) + bytes(json) > USAGE_LIMIT) throw new HttpError(413, 'storage-full');
+    await db.prepare('INSERT OR REPLACE INTO days (person_id, date, day) VALUES (?, ?, ?)').bind(me.id, date, json).run();
     return { ok: true };
   }
   if (m === 'PUT' && p === '/popup') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(body.date)) { data.popupShown = body.date; await saveData(); }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(body.date))
+      await db.prepare('UPDATE people SET data = ? WHERE id = ?').bind(JSON.stringify({ ...data, popupShown: body.date }), me.id).run();
     return { ok: true };
   }
-  if (m === 'GET' && p === '/archive')
-    return Object.fromEntries(Object.entries(data.days).map(([d, day]) =>
-      [d, { done: day.tasks.filter(t => t.done).length, total: day.tasks.length, notes: day.notes.length }]));
+  if (m === 'GET' && p === '/archive') {
+    const { results } = await db.prepare('SELECT date, day FROM days WHERE person_id = ?').bind(me.id).all();
+    return Object.fromEntries(results.map(r => { const day = JSON.parse(r.day);
+      return [r.date, { done: day.tasks.filter(t => t.done).length, total: day.tasks.length, notes: day.notes.length }]; }));
+  }
   if (m === 'GET' && p === '/archive/day') {
-    const day = data.days[new URL(req.url).searchParams.get('date')];
-    if (!day) throw new HttpError(404, 'no-day');
-    return day;
+    const row = await db.prepare('SELECT day FROM days WHERE person_id = ? AND date = ?').bind(me.id, new URL(req.url).searchParams.get('date')).first();
+    if (!row) throw new HttpError(404, 'no-day');
+    return JSON.parse(row.day);
+  }
+
+  // Help: anyone can send; only admins read everything and mark messages solved.
+  if (m === 'POST' && p === '/help') {
+    const text = String(body.text || '').trim();
+    if (!text || text.length > 2000) throw new HttpError(400, 'bad-text');
+    if (await usage(db, me.id) + bytes(text) > USAGE_LIMIT) throw new HttpError(413, 'storage-full');
+    await db.prepare('INSERT INTO help (person_id, text, created) VALUES (?, ?, ?)').bind(me.id, text, Date.now()).run();
+    const { results: admins } = await db.prepare('SELECT id, settings FROM people WHERE is_admin = 1').all();
+    for (const a of admins) {
+      const t = TEXT[JSON.parse(a.settings).lang];
+      await notify(env, a.id, { title: t.helpNewTitle(me.name), body: text.slice(0, 180) });
+    }
+    return { ok: true };
+  }
+  if (m === 'GET' && p === '/help') {
+    const sql = 'SELECT h.id, h.text, h.created, h.solved, p.name FROM help h JOIN people p ON p.id = h.person_id '
+      + (me.is_admin ? '' : 'WHERE h.person_id = ? ') + 'ORDER BY h.solved, h.created DESC';
+    const stmt = db.prepare(sql);
+    const { results } = await (me.is_admin ? stmt : stmt.bind(me.id)).all();
+    return results.map(r => ({ ...r, solved: !!r.solved }));
   }
   if (m === 'PUT' && p === '/settings') {
     const settings = cleanSettings(body.settings || {}, JSON.parse(me.settings));
@@ -168,12 +197,48 @@ async function route(req, env) {
     if (m === 'DELETE' && p === '/admin/people') {
       const id = String(body.id);
       if (id === me.id) throw new HttpError(400, 'cannot-remove-self');
-      await db.batch(['DELETE FROM subs WHERE person_id = ?', 'DELETE FROM sessions WHERE person_id = ?', 'DELETE FROM people WHERE id = ?']
-        .map(sql => db.prepare(sql).bind(id)));
+      await db.batch(['DELETE FROM subs WHERE person_id = ?', 'DELETE FROM sessions WHERE person_id = ?', 'DELETE FROM days WHERE person_id = ?',
+        'DELETE FROM help WHERE person_id = ?', 'DELETE FROM people WHERE id = ?'].map(sql => db.prepare(sql).bind(id)));
+      return { ok: true };
+    }
+    if (m === 'GET' && p === '/admin/usage') {
+      const { results } = await db.prepare('SELECT id FROM people').all();
+      return { limit: USAGE_LIMIT, people: Object.fromEntries(await Promise.all(results.map(async r => [r.id, await usage(db, r.id)]))) };
+    }
+    if (m === 'POST' && p === '/admin/help-solved') { // tick / untick; ticking tells the sender
+      const id = Number(body.id), solved = body.solved === true;
+      const msg = await db.prepare('SELECT h.person_id, h.solved, p.settings FROM help h JOIN people p ON p.id = h.person_id WHERE h.id = ?').bind(id).first();
+      if (!msg) throw new HttpError(404, 'no-message');
+      await db.prepare('UPDATE help SET solved = ? WHERE id = ?').bind(solved ? 1 : 0, id).run();
+      if (solved && !msg.solved) {
+        const t = TEXT[JSON.parse(msg.settings).lang];
+        await notify(env, msg.person_id, { title: t.helpSolvedTitle, body: t.helpSolvedBody });
+      }
       return { ok: true };
     }
   }
   throw new HttpError(404, 'not-found');
+}
+
+// Not exported: Cloudflare only allows functions/handlers as exports from this file.
+const USAGE_LIMIT = 5 * 1024 * 1024; // 5 MB per person: their days + their Help messages
+const bytes = s => new TextEncoder().encode(s).length;
+async function usage(db, personId) {
+  const r = await db.prepare(`SELECT
+      (SELECT COALESCE(SUM(length(CAST(day AS BLOB))), 0) FROM days WHERE person_id = ?1) +
+      (SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM help WHERE person_id = ?1) AS n`).bind(personId).first();
+  return r.n;
+}
+async function recentDays(db, personId) {
+  const { results } = await db.prepare('SELECT date, day FROM days WHERE person_id = ? ORDER BY date DESC LIMIT 2').bind(personId).all();
+  return Object.fromEntries(results.map(r => [r.date, JSON.parse(r.day)]));
+}
+async function notify(env, personId, msg) {
+  const { results: subs } = await env.DB.prepare('SELECT endpoint, sub FROM subs WHERE person_id = ?').bind(personId).all();
+  for (const row of subs) {
+    const status = await sendPush(JSON.parse(row.sub), msg, env).catch(() => 0);
+    if (status === 404 || status === 410) await env.DB.prepare('DELETE FROM subs WHERE endpoint = ?').bind(row.endpoint).run();
+  }
 }
 
 // The pepper lives only in the server's secret settings, so a copy of the database alone can't be used to guess PINs.
@@ -257,16 +322,12 @@ export function dueReminders(person, now) {
 // shortcut: sends one by one inside a single cron run; fine for a family, rework if it grows past ~10 people.
 async function sendReminders(env, now) {
   const db = env.DB;
-  const { results: people } = await db.prepare('SELECT id, data, settings, last_summary, last_morning FROM people').all();
+  const { results: people } = await db.prepare('SELECT id, settings, last_summary, last_morning FROM people').all();
   for (const person of people) {
+    person.data = JSON.stringify({ days: await recentDays(db, person.id) }); // today + the day before is all reminders need
     const { messages, summaryDate, morningDate } = dueReminders(person, now);
     if (summaryDate) await db.prepare('UPDATE people SET last_summary = ? WHERE id = ?').bind(summaryDate, person.id).run();
     if (morningDate) await db.prepare('UPDATE people SET last_morning = ? WHERE id = ?').bind(morningDate, person.id).run();
-    if (!messages.length) continue;
-    const { results: subs } = await db.prepare('SELECT endpoint, sub FROM subs WHERE person_id = ?').bind(person.id).all();
-    for (const row of subs) for (const msg of messages) {
-      const status = await sendPush(JSON.parse(row.sub), msg, env).catch(() => 0);
-      if (status === 404 || status === 410) await db.prepare('DELETE FROM subs WHERE endpoint = ?').bind(row.endpoint).run();
-    }
+    for (const msg of messages) await notify(env, person.id, msg);
   }
 }
