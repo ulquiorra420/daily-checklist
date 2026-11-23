@@ -7,9 +7,10 @@ CREATE TABLE IF NOT EXISTS people (
   salt TEXT,
   failed INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER NOT NULL DEFAULT 0,
-  data TEXT NOT NULL,          -- {"tasks":[...],"done":{"YYYY-MM-DD":[...]}}
-  settings TEXT NOT NULL,      -- {"lang","tz","water":{on,every,from,to},"summary":{on,time}}
-  last_summary TEXT            -- local date the 'still to do' reminder was last sent
+  data TEXT NOT NULL,          -- {"days":{"YYYY-MM-DD":{tasks:[{text,done,repeat}],notes:[...]}},"popupShown":date}
+  settings TEXT NOT NULL,      -- {"lang","tz","water":{on,every,from,to},"summary":{on,time},"morning":{on,time}}
+  last_summary TEXT,           -- local date the 'still to do' reminder was last sent
+  last_morning TEXT            -- local date the 10am 'moved to today' reminder was last sent
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,

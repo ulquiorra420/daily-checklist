@@ -19,15 +19,21 @@
   ul { list-style:none; padding:0; margin:0 0 16px; }
   li, .card { background:var(--card); border-radius:12px; padding:14px; margin-bottom:8px; }
   li { display:flex; align-items:center; gap:12px; }
-  li label { flex:1; display:flex; gap:12px; align-items:center; cursor:pointer; }
-  li input { width:22px; height:22px; accent-color:var(--accent); }
+  li label { flex:1; display:flex; gap:12px; align-items:center; cursor:pointer; min-width:0; }
+  li label span { overflow-wrap:anywhere; }
+  li input[type=checkbox] { width:22px; height:22px; flex:0 0 auto; accent-color:var(--accent); }
   li.done span { text-decoration:line-through; color:var(--muted); }
-  li button, .icon { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
+  li button, .icon { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; padding:4px; }
+  .repeat { font-size:16px !important; opacity:.25; }
+  .repeat[aria-pressed=true] { opacity:1; }
   form { display:flex; gap:8px; }
-  input[type=text], input[type=password], input[type=time], select { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  input, select, button, textarea { box-sizing:border-box; font-family:inherit; }
+  input[type=text], input[type=password], input[type=time], select, textarea { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  textarea { width:100%; resize:vertical; }
   button.main { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; cursor:pointer; }
+  button.toggle { padding:0 12px; border:1px solid var(--muted); border-radius:10px; background:var(--card); font-size:18px; opacity:.4; cursor:pointer; }
+  button.toggle[aria-pressed=true] { opacity:1; border-color:var(--accent); }
   .person { display:block; width:100%; text-align:left; font-size:20px; padding:18px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
-  input, select, button { box-sizing:border-box; }
   #pin-input { display:block; width:100%; font-size:32px; letter-spacing:16px; text-align:center; }
   .msg { min-height:1.4em; color:var(--danger); }
   .card label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
@@ -35,6 +41,28 @@
   .card input[type=checkbox] { width:22px; height:22px; accent-color:var(--accent); }
   .link { background:none; border:0; padding:0; color:var(--accent); font-size:15px; cursor:pointer; text-decoration:underline; }
   .link.danger { color:var(--danger); }
+  /* Notes: bullet points */
+  #notes li, .day-notes li { display:list-item; list-style:disc inside; background:none; padding:4px 0; margin:0; }
+  #notes li { display:flex; gap:8px; align-items:flex-start; }
+  #notes li::before { content:'•'; color:var(--muted); }
+  #notes li span { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; cursor:text; }
+  #notes li textarea { flex:1; }
+  .day-notes li { white-space:pre-wrap; overflow-wrap:anywhere; }
+  /* The Bar */
+  #backdrop { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:10; }
+  #bar { position:fixed; top:0; bottom:0; left:0; width:78%; max-width:320px; background:var(--bg); z-index:11; padding:24px 16px; box-sizing:border-box;
+         transform:translateX(-105%); transition:transform .25s; box-shadow:2px 0 16px rgba(0,0,0,.2); }
+  #bar.open { transform:none; }
+  #bar button.item { display:block; width:100%; text-align:left; font-size:19px; padding:16px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
+  /* Archive */
+  .day-btn { display:flex; justify-content:space-between; width:100%; text-align:left; font-size:17px; padding:14px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:8px; cursor:pointer; }
+  .day-btn:disabled { opacity:.45; cursor:default; }
+  .day-list li { gap:10px; }
+  /* Pop-up */
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
+  #modal .box { background:var(--bg); border-radius:16px; padding:20px; max-width:400px; width:100%; box-sizing:border-box; }
+  #modal ul { margin:12px 0; }
+  #modal li { padding:10px 14px; }
   footer { margin-top:32px; font-size:14px; color:var(--muted); }
   footer p { margin:0 0 6px; }
   [hidden] { display:none !important; }
@@ -46,6 +74,25 @@
 </head>
 <body>
 <div id="ptr" aria-hidden="true"><div class="spin"></div></div>
+
+<!-- The Bar (swipe right from the left edge, or tap ☰) -->
+<div id="backdrop" hidden></div>
+<nav id="bar" aria-label="Menu" hidden>
+  <p class="muted" id="bar-who" style="margin:0 0 16px"></p>
+  <button class="item" id="go-settings">⚙︎ <span data-t="settings"></span></button>
+  <button class="item" id="go-archive">🗂 <span data-t="archive"></span></button>
+</nav>
+
+<!-- "Moved to today" pop-up -->
+<div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+  <div class="box">
+    <h2 id="modal-title" style="margin-top:0"></h2>
+    <p id="modal-text" class="muted" style="margin:0"></p>
+    <ul id="modal-list"></ul>
+    <button class="main" id="modal-ok" style="width:100%">OK</button>
+  </div>
+</div>
+
 <main>
   <!-- 1. Who are you? -->
   <section id="pick" hidden>
@@ -63,19 +110,28 @@
     <p class="msg" id="pin-msg" role="alert"></p>
   </section>
 
-  <!-- 3. Today's list -->
+  <!-- 3. Today -->
   <section id="today" hidden>
-    <div class="row between">
+    <div class="row">
+      <button class="icon" id="open-bar" aria-label="Menu" style="color:var(--text)">☰</button>
       <h1 data-t="today"></h1>
-      <button class="icon" id="open-settings" aria-label="Settings">⚙︎</button>
     </div>
     <p id="date"></p>
     <ul id="list"></ul>
     <p id="progress"></p>
     <form id="add">
       <input id="name" type="text" required>
+      <button type="button" class="toggle" id="add-repeat" aria-pressed="false">🔁</button>
       <button class="main" data-t="add"></button>
     </form>
+    <p class="muted" id="repeat-hint" style="font-size:14px;margin:6px 0 0"></p>
+
+    <h2 data-t="note"></h2>
+    <form id="note-form" style="flex-direction:column">
+      <textarea id="note-text" rows="2"></textarea>
+      <button class="main" data-t="addNote" style="align-self:flex-end"></button>
+    </form>
+    <ul id="notes" style="margin-top:12px"></ul>
   </section>
 
   <!-- 4. Settings -->
@@ -104,6 +160,12 @@
       <label><span data-t="to"></span><select id="w-to"></select></label>
     </div>
 
+    <h2 data-t="morning"></h2>
+    <div class="card">
+      <label><span data-t="on"></span><input type="checkbox" id="m-on"></label>
+      <label><span data-t="at"></span><input type="time" id="m-time"></label>
+    </div>
+
     <h2 data-t="summary"></h2>
     <div class="card">
       <label><span data-t="on"></span><input type="checkbox" id="s-on"></label>
@@ -127,13 +189,32 @@
     <p style="margin-top:24px"><button class="link" id="switch" data-t="switchPerson"></button></p>
   </section>
 
+  <!-- 5. Archive: list of past days -->
+  <section id="archive" hidden>
+    <button class="link back-today" data-t="backToday"></button>
+    <h1 data-t="archive" style="margin:16px 0"></h1>
+    <p class="msg" id="archive-msg"></p>
+    <div id="archive-list"></div>
+  </section>
+
+  <!-- 6. Archive: one day -->
+  <section id="archive-day" hidden>
+    <button class="link" id="back-archive" data-t="backArchive"></button>
+    <h1 id="day-title" style="margin:16px 0 4px"></h1>
+    <p class="muted" id="day-summary" style="margin:0 0 16px"></p>
+    <ul class="day-list" id="day-tasks"></ul>
+    <h2 data-t="note" id="day-notes-title"></h2>
+    <ul class="day-notes" id="day-notes"></ul>
+    <p class="muted" id="day-legacy" style="font-size:14px" data-t="legacy"></p>
+  </section>
+
   <footer>
     <p id="sync-status"></p>
     <p><span data-t="version"></span> <span id="ver"></span> · <span data-t="pullHint"></span></p>
   </footer>
 </main>
 <script>
-  const VERSION = 8; // bump on every release so installed copies update themselves
+  const VERSION = 9; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -149,70 +230,95 @@
 
   const T = {
     en: {
-      today: 'Today', add: 'Add', addPlaceholder: 'Add a daily task…', del: 'Delete?', sure: 'Sure?',
+      today: 'Today', add: 'Add', addPlaceholder: 'Add a task…', del: 'Delete?', sure: 'Sure?',
       progress: (n, t) => `${n} of ${t} done`, noTasks: 'No tasks yet.',
+      repeat: 'Repeat daily', repeatOn: '🔁 This task will come back every day.', repeatOff: 'Tap 🔁 to make a task repeat every day.',
+      note: 'Note', notePlaceholder: 'Write a note…', addNote: 'Add note', save: 'Save',
+      settings: 'Settings', archive: 'Archive', backToday: '← Today', backArchive: '← Archive',
+      noPast: 'No past days yet.', nothing: 'Nothing recorded', finished: 'Finished', notFinished: 'Not finished',
+      dayCount: (n, t) => `${n}/${t} done`, notesCount: n => `📝 ${n}`, legacy: 'Before version 9, only finished tasks were recorded.',
+      movedTitle: (from, y) => from === y ? 'Not finished yesterday' : `Not finished on ${from}`, movedText: 'These were moved to today:',
       enterPin: 'Enter your PIN', choosePin: 'Choose a 4-digit PIN', againPin: 'Type the same PIN again',
       pinMismatch: "The PINs didn't match. Try again.", wrongPin: n => `Wrong PIN. ${n} ${n === 1 ? 'try' : 'tries'} left.`,
       locked: m => `Too many wrong tries. Try again in ${m} minutes.`, back: '← Back',
-      settings: 'Settings', done: 'Done', language: 'Language', notifications: 'Notifications',
+      done: 'Done', language: 'Language', notifications: 'Notifications',
       notifOn: 'Turn on notifications', notifEnabled: 'Notifications are on for this device ✓', notifOff: 'Notifications are off on this device.',
       notifNeedsHome: 'To get notifications on iPhone, open the app from its Home Screen icon (iOS 16.4 or newer).',
       notifDenied: 'Notifications are blocked. Turn them on in iPhone Settings → Notifications → Daily Checklist.',
       notifError: 'Could not turn on notifications. Try again.',
       water: 'Water reminder', on: 'On', every: 'Every', minutes: 'min', from: 'From', to: 'Until',
-      summary: '"Still to do" reminder', at: 'At', switchPerson: 'Switch person',
+      morning: 'Morning reminder (unfinished from yesterday)', summary: '"Still to do" reminder', at: 'At', switchPerson: 'Switch person',
       admin: 'Family (admin)', resetPin: 'Reset PIN', resetDone: n => `${n} will choose a new PIN next time.`, remove: 'Remove',
       namePlaceholder: 'Name', nameTaken: 'That name is already used.', fromTo: '"From" must be earlier than "Until".',
       offline: 'Offline. Changes will sync when you are back online.', syncing: 'Syncing…', synced: 'Saved ✓',
       syncProblem: 'Could not reach the server. Will try again.', version: 'App version', pullHint: 'pull down to check for changes',
-      signedInAs: n => `Signed in as ${n}`,
+      signedInAs: n => `Signed in as ${n}`, starter: 'Drink water',
     },
     vi: {
-      today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc hằng ngày…', del: 'Xoá?', sure: 'Chắc chưa?',
+      today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc…', del: 'Xoá?', sure: 'Chắc chưa?',
       progress: (n, t) => `Đã xong ${n}/${t}`, noTasks: 'Chưa có việc nào.',
+      repeat: 'Lặp lại hằng ngày', repeatOn: '🔁 Việc này sẽ lặp lại mỗi ngày.', repeatOff: 'Bấm 🔁 để việc lặp lại mỗi ngày.',
+      note: 'Ghi chú', notePlaceholder: 'Viết ghi chú…', addNote: 'Thêm ghi chú', save: 'Lưu',
+      settings: 'Cài đặt', archive: 'Lưu trữ', backToday: '← Hôm nay', backArchive: '← Lưu trữ',
+      noPast: 'Chưa có ngày nào.', nothing: 'Không có ghi chép', finished: 'Đã xong', notFinished: 'Chưa xong',
+      dayCount: (n, t) => `Xong ${n}/${t}`, notesCount: n => `📝 ${n}`, legacy: 'Trước phiên bản 9, chỉ lưu các việc đã xong.',
+      movedTitle: (from, y) => from === y ? 'Hôm qua chưa xong' : `Ngày ${from} chưa xong`, movedText: 'Đã chuyển sang hôm nay:',
       enterPin: 'Nhập mã PIN của bạn', choosePin: 'Chọn mã PIN 4 số', againPin: 'Nhập lại mã PIN một lần nữa',
       pinMismatch: 'Hai mã PIN không khớp. Thử lại nhé.', wrongPin: n => `Sai mã PIN. Còn ${n} lần thử.`,
       locked: m => `Sai quá nhiều lần. Thử lại sau ${m} phút.`, back: '← Quay lại',
-      settings: 'Cài đặt', done: 'Xong', language: 'Ngôn ngữ', notifications: 'Thông báo',
+      done: 'Xong', language: 'Ngôn ngữ', notifications: 'Thông báo',
       notifOn: 'Bật thông báo', notifEnabled: 'Đã bật thông báo trên máy này ✓', notifOff: 'Thông báo chưa bật trên máy này.',
       notifNeedsHome: 'Để nhận thông báo trên iPhone, hãy mở ứng dụng từ biểu tượng trên Màn hình chính (iOS 16.4 trở lên).',
       notifDenied: 'Thông báo đang bị chặn. Hãy bật trong Cài đặt iPhone → Thông báo → Daily Checklist.',
       notifError: 'Không bật được thông báo. Thử lại nhé.',
       water: 'Nhắc uống nước', on: 'Bật', every: 'Mỗi', minutes: 'phút', from: 'Từ', to: 'Đến',
-      summary: 'Nhắc việc chưa làm', at: 'Lúc', switchPerson: 'Đổi người dùng',
+      morning: 'Nhắc buổi sáng (việc hôm qua chưa xong)', summary: 'Nhắc việc chưa làm', at: 'Lúc', switchPerson: 'Đổi người dùng',
       admin: 'Gia đình (quản trị)', resetPin: 'Đặt lại PIN', resetDone: n => `${n} sẽ chọn mã PIN mới ở lần mở tới.`, remove: 'Xoá',
       namePlaceholder: 'Tên', nameTaken: 'Tên này đã có người dùng.', fromTo: 'Giờ "Từ" phải sớm hơn giờ "Đến".',
       offline: 'Mất mạng. Sẽ đồng bộ khi có mạng lại.', syncing: 'Đang đồng bộ…', synced: 'Đã lưu ✓',
       syncProblem: 'Không kết nối được máy chủ. Sẽ thử lại.', version: 'Phiên bản', pullHint: 'kéo xuống để cập nhật',
-      signedInAs: n => `Đang dùng: ${n}`,
+      signedInAs: n => `Đang dùng: ${n}`, starter: 'Uống nước',
     },
   };
 
   const $ = id => document.getElementById(id);
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
   const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time
+  const addDays = (date, n) => new Date(Date.parse(date + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
   const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+  // Versions 7–8 stored 'dirty' as "1" and the list under 'list'; they mean nothing now.
+  if (typeof load('dirty', null) !== 'string') localStorage.removeItem('dirty');
+  localStorage.removeItem('list');
+
   let token = localStorage.getItem('session');
-  let me = load('me', null);            // { id, name, isAdmin, settings }
-  let state = load('list', null);       // { tasks, done }
+  let me = load('me', null);              // { id, name, isAdmin, settings }
+  let days = load('days', null);          // the two most recent days: { 'YYYY-MM-DD': { tasks, notes, carried?, from? } }
+  let popupShown = load('popupShown', null);
+  let serverEmpty = false;                // brand-new person: no days on the server yet
   let pushTimer = null;
   let lang = me?.settings?.lang || (navigator.language.startsWith('vi') ? 'vi' : 'en');
   const t = k => T[lang][k];
 
-  function show(id) { for (const s of ['pick', 'pin', 'today', 'settings']) $(s).hidden = s !== id; }
+  const SCREENS = ['pick', 'pin', 'today', 'settings', 'archive', 'archive-day'];
+  function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; closeBar(); }
+  const current = () => SCREENS.find(s => !$(s).hidden);
   function translate() {
     document.documentElement.lang = lang;
     document.querySelectorAll('[data-t]').forEach(el => el.textContent = t(el.dataset.t));
     $('name').placeholder = t('addPlaceholder');
+    $('note-text').placeholder = t('notePlaceholder');
     $('admin-name').placeholder = t('namePlaceholder');
+    $('add-repeat').setAttribute('aria-label', t('repeat'));
     $('ver').textContent = VERSION;
   }
   function status(msg) { $('sync-status').textContent = msg || ''; }
+  const fmtDate = (d, opts = { weekday: 'long', month: 'long', day: 'numeric' }) =>
+    new Date(d + 'T12:00:00').toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', opts);
 
   // ---------- server ----------
   async function api(path, method = 'GET', body) {
-    const r = await fetch(API + path, { method, cache: 'no-store',
+    const r = await fetch(API + path, { method, cache: 'no-store', keepalive: method !== 'GET' && JSON.stringify(body || {}).length < 60000,
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
       body: body && JSON.stringify(body) });
     const data = await r.json().catch(() => ({}));
@@ -260,9 +366,10 @@
     try {
       token = (await api('/login', 'POST', { id: pinPerson.id, pin })).token;
       localStorage.setItem('session', token);
-      ['gh-token', 'gist-id', 'dirty', 'state', 'tasks'].forEach(k => localStorage.removeItem(k)); // old GitHub-sync storage
+      // storage from older versions
+      ['gh-token', 'gist-id', 'dirty', 'state', 'tasks', 'list'].forEach(k => localStorage.removeItem(k));
       for (const k of Object.keys(localStorage)) if (k.startsWith('done-')) localStorage.removeItem(k);
-      state = null;
+      days = null;
       await pull();
       relinkNotifications();
     } catch (err) {
@@ -271,57 +378,138 @@
       else if (d.error === 'locked') $('pin-msg').textContent = t('locked')(d.minutes);
       else if (d.error === 'pin-already-set') { pinPerson.hasPin = true; showPin(pinPerson); }
       else $('pin-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline');
-    } finally { el.disabled = false; el.focus(); }
+    } finally { el.disabled = false; }
   };
 
   function signOut() {
-    token = me = state = null;
-    ['session', 'me', 'list', 'dirty'].forEach(k => localStorage.removeItem(k));
+    token = me = days = popupShown = null;
+    ['session', 'me', 'days', 'dirty', 'popupShown', 'list'].forEach(k => localStorage.removeItem(k));
     showPick();
   }
 
-  // ---------- 3. today's list ----------
-  const doneToday = () => state.done[today()] || [];
-  function change() {
-    localStorage.setItem('list', JSON.stringify(state));
-    localStorage.setItem('dirty', '1'); // has changes the server hasn't got yet
-    renderList();
+  // ---------- days ----------
+  // Same rule as newDay() in server/index.js (keep in sync): finished one-time tasks stay behind in the
+  // Archive; unfinished and repeat-daily tasks come to the new day unticked; notes start empty.
+  function newDay(all, date) {
+    const prevKey = Object.keys(all).filter(d => d < date).sort().pop();
+    const prev = all[prevKey];
+    if (!prev) return { tasks: [], notes: [], carried: [] };
+    return {
+      tasks: prev.tasks.filter(x => !x.done || x.repeat).map(x => ({ text: x.text, done: false, repeat: x.repeat })),
+      notes: [],
+      carried: prev.tasks.filter(x => !x.done).map(x => x.text),
+      from: prevKey,
+    };
+  }
+  function todayDay() {
+    const d = today();
+    if (!days[d]) {
+      days[d] = newDay(days, d);
+      if (serverEmpty && !days[d].tasks.length) days[d].tasks.push({ text: t('starter'), done: false, repeat: true });
+      const keep = Object.keys(days).sort().slice(-2); // older days live on the server (Archive)
+      days = Object.fromEntries(keep.map(k => [k, days[k]]));
+      markDirty(d);
+    }
+    return days[d];
+  }
+  function markDirty(d) {
+    localStorage.setItem('days', JSON.stringify(days));
+    localStorage.setItem('dirty', JSON.stringify(d)); // today has changes the server hasn't got yet
     clearTimeout(pushTimer); pushTimer = setTimeout(push, 800);
   }
-  function renderList() {
-    $('date').textContent = new Date().toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const change = () => { markDirty(today()); renderToday(); };
+
+  // ---------- 3. today ----------
+  let addRepeat = false;
+  function renderToday() {
+    const day = todayDay();
+    $('date').textContent = fmtDate(today());
     const list = $('list');
     list.textContent = '';
-    state.tasks.forEach(task => {
+    day.tasks.forEach(task => {
       const li = document.createElement('li');
-      const isDone = doneToday().includes(task);
-      li.className = isDone ? 'done' : '';
-      li.innerHTML = '<label><input type="checkbox"><span></span></label><button aria-label="Delete">×</button>';
-      li.querySelector('span').textContent = task; // textContent, so typed text can't inject HTML
+      li.className = task.done ? 'done' : '';
+      li.innerHTML = '<label><input type="checkbox"><span></span></label><button class="repeat"></button><button aria-label="Delete">×</button>';
+      li.querySelector('span').textContent = task.text; // textContent, so typed text can't inject HTML
       const box = li.querySelector('input');
-      box.checked = isDone;
-      box.onchange = () => {
-        state.done[today()] = box.checked ? [...doneToday(), task] : doneToday().filter(x => x !== task);
-        change();
-      };
-      armedButton(li.querySelector('button'), t('del'), () => { state.tasks = state.tasks.filter(x => x !== task); change(); });
+      box.checked = task.done;
+      box.onchange = () => { task.done = box.checked; change(); };
+      const rep = li.querySelector('.repeat');
+      rep.textContent = '🔁'; rep.setAttribute('aria-pressed', task.repeat); rep.setAttribute('aria-label', t('repeat')); rep.title = t('repeat');
+      rep.onclick = () => { task.repeat = !task.repeat; change(); };
+      armedButton(li.querySelector('button:last-child'), t('del'), () => { day.tasks = day.tasks.filter(x => x !== task); change(); });
       list.appendChild(li);
     });
-    const n = state.tasks.filter(x => doneToday().includes(x)).length;
-    $('progress').textContent = state.tasks.length ? t('progress')(n, state.tasks.length) + (n === state.tasks.length ? ' 🎉' : '') : t('noTasks');
+    const n = day.tasks.filter(x => x.done).length;
+    $('progress').textContent = day.tasks.length ? t('progress')(n, day.tasks.length) + (n === day.tasks.length ? ' 🎉' : '') : t('noTasks');
+    $('add-repeat').setAttribute('aria-pressed', addRepeat);
+    $('repeat-hint').textContent = t(addRepeat ? 'repeatOn' : 'repeatOff');
+    renderNotes(day);
   }
   // Tap once to arm, tap again to act (pop-up confirm() is blocked in some app views).
   function armedButton(btn, armedText, action) {
-    btn.onclick = () => {
+    btn.onclick = e => {
+      e.stopPropagation();
       if (btn.dataset.armed) return action();
       btn.dataset.armed = 1; btn.textContent = armedText; btn.style.color = 'var(--danger)'; btn.style.fontSize = '15px';
     };
   }
   $('add').onsubmit = e => {
     e.preventDefault();
-    const task = $('name').value.trim();
-    if (task && !state.tasks.includes(task)) { state.tasks.push(task); change(); }
+    const text = $('name').value.trim(), day = todayDay();
+    if (text && !day.tasks.some(x => x.text === text)) { day.tasks.push({ text, done: false, repeat: addRepeat }); change(); }
     $('name').value = '';
+  };
+  $('add-repeat').onclick = () => { addRepeat = !addRepeat; renderToday(); };
+
+  // Notes: today's notes can be edited or deleted; after midnight they belong to the Archive (read-only).
+  let editingNote = -1;
+  function renderNotes(day) {
+    const ul = $('notes');
+    ul.textContent = '';
+    day.notes.forEach((note, i) => {
+      const li = document.createElement('li');
+      if (i === editingNote) {
+        li.innerHTML = '<textarea rows="3"></textarea><button class="main"></button>';
+        const ta = li.querySelector('textarea'), save = li.querySelector('button');
+        ta.value = note; save.textContent = t('save');
+        save.onclick = () => {
+          const v = ta.value.trim();
+          if (v) day.notes[i] = v; else day.notes.splice(i, 1);
+          editingNote = -1; change();
+        };
+        ul.appendChild(li); ta.focus();
+        return;
+      }
+      li.innerHTML = '<span></span><button aria-label="Delete">×</button>';
+      const span = li.querySelector('span');
+      span.textContent = note;
+      span.onclick = () => { editingNote = i; renderNotes(day); };
+      armedButton(li.querySelector('button'), t('del'), () => { day.notes.splice(i, 1); editingNote = -1; change(); });
+      ul.appendChild(li);
+    });
+  }
+  $('note-form').onsubmit = e => {
+    e.preventDefault();
+    const v = $('note-text').value.trim();
+    if (v) { todayDay().notes.push(v); $('note-text').value = ''; editingNote = -1; change(); }
+  };
+
+  // "Moved to today" pop-up: the first time the app is opened each day.
+  function maybePopup() {
+    const d = today(), day = days?.[d];
+    if (!day?.carried?.length || popupShown === d || current() !== 'today' || !$('modal').hidden) return;
+    $('modal-title').textContent = t('movedTitle')(day.from, addDays(d, -1));
+    $('modal-text').textContent = t('movedText');
+    $('modal-list').textContent = '';
+    for (const x of day.carried) { const li = document.createElement('li'); li.textContent = x; $('modal-list').appendChild(li); }
+    $('modal').hidden = false;
+    $('modal-ok').focus();
+  }
+  $('modal-ok').onclick = () => {
+    $('modal').hidden = true;
+    popupShown = today(); localStorage.setItem('popupShown', JSON.stringify(popupShown));
+    api('/popup', 'PUT', { date: popupShown }).catch(() => {});
   };
 
   // ---------- sync ----------
@@ -329,29 +517,100 @@
     if (!token) return;
     if (!navigator.onLine) return status(t('offline'));
     try {
-      if (localStorage.getItem('dirty')) return push(); // don't overwrite changes made offline
+      if (load('dirty', null)) { await push(); if (load('dirty', null)) return; } // don't overwrite changes made offline
       const r = await api('/me');
+      if (!r.recent) throw new Error('old-server');
       me = { id: r.id, name: r.name, isAdmin: r.isAdmin, settings: r.settings };
-      state = r.data;
+      days = r.recent;
+      serverEmpty = !Object.keys(days).length;
+      popupShown = r.popupShown;
       localStorage.setItem('me', JSON.stringify(me));
-      localStorage.setItem('list', JSON.stringify(state));
+      localStorage.setItem('days', JSON.stringify(days));
+      localStorage.setItem('popupShown', JSON.stringify(popupShown));
       if (me.settings.tz !== deviceTz) saveSettings({ tz: deviceTz }); // reminders follow this phone's time zone
       if (lang !== me.settings.lang) { lang = me.settings.lang; translate(); }
-      if ($('settings').hidden) { renderList(); show('today'); }
+      $('bar-who').textContent = t('signedInAs')(me.name);
+      const screen = current();
+      if (screen === 'pick' || screen === 'pin' || !screen) show('today');
+      if (current() === 'today' && editingNote < 0 && document.activeElement?.id !== 'note-text') renderToday(); else todayDay();
+      maybePopup();
       status(t('synced'));
     } catch (e) { if (e.message !== 'signed-out') status(t('syncProblem')); }
   }
-  async function push(keepalive = false) {
+  async function push() {
     clearTimeout(pushTimer); pushTimer = null;
-    if (!token) return;
+    const date = load('dirty', null);
+    if (!token || !date || !days?.[date]) return;
     try {
       status(t('syncing'));
-      await fetch(API + '/data', { method: 'PUT', keepalive, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ data: state }) })
-        .then(r => { if (!r.ok) throw new Error(r.status); });
-      localStorage.removeItem('dirty');
+      await api('/day', 'PUT', { date, day: days[date] });
+      if (load('dirty', null) === date && !pushTimer) localStorage.removeItem('dirty');
       status(t('synced'));
-    } catch { status(navigator.onLine ? t('syncProblem') : t('offline')); }
+    } catch (e) {
+      if (e.message === 'day-is-archived') { localStorage.removeItem('dirty'); return pull(); } // another phone already moved on
+      status(navigator.onLine ? t('syncProblem') : t('offline'));
+    }
   }
+
+  // ---------- The Bar ----------
+  function openBar() {
+    if (!me || ['pick', 'pin'].includes(current())) return;
+    $('bar-who').textContent = t('signedInAs')(me.name);
+    $('bar').hidden = false; $('backdrop').hidden = false;
+    void $('bar').offsetWidth; // let the browser place it off-screen first, so it slides in
+    $('bar').classList.add('open');
+  }
+  function closeBar() {
+    $('bar').classList.remove('open'); $('backdrop').hidden = true;
+    setTimeout(() => { if (!$('bar').classList.contains('open')) $('bar').hidden = true; }, 250);
+  }
+  $('open-bar').onclick = openBar;
+  $('backdrop').onclick = closeBar;
+  $('go-settings').onclick = () => { renderSettings(); show('settings'); };
+  $('go-archive').onclick = showArchive;
+
+  // ---------- 5/6. Archive ----------
+  async function showArchive() {
+    show('archive');
+    const box = $('archive-list');
+    box.textContent = ''; $('archive-msg').textContent = '';
+    let summary;
+    try { summary = await api('/archive'); } catch { $('archive-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); return; }
+    const dates = Object.keys(summary).sort(), last = addDays(today(), -1);
+    if (!dates.length || dates[0] > last) { box.textContent = t('noPast'); return; }
+    for (let d = last; d >= dates[0]; d = addDays(d, -1)) {
+      const s = summary[d], b = document.createElement('button');
+      b.className = 'day-btn';
+      b.innerHTML = '<span></span><span class="muted"></span>';
+      b.firstChild.textContent = fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' });
+      b.lastChild.textContent = s ? [s.total && t('dayCount')(s.done, s.total), s.notes && t('notesCount')(s.notes)].filter(Boolean).join(' · ') : t('nothing');
+      if (s) b.onclick = () => showArchiveDay(d); else b.disabled = true;
+      box.appendChild(b);
+    }
+  }
+  async function showArchiveDay(d) {
+    let day;
+    try { day = await api('/archive/day?date=' + d); } catch { $('archive-msg').textContent = t('syncProblem'); return; }
+    show('archive-day');
+    $('day-title').textContent = fmtDate(d);
+    const n = day.tasks.filter(x => x.done).length;
+    $('day-summary').textContent = day.tasks.length ? t('dayCount')(n, day.tasks.length) : '';
+    const ul = $('day-tasks'); ul.textContent = '';
+    for (const x of day.tasks) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span></span><span style="flex:1"></span><span class="muted" style="font-size:14px"></span>';
+      li.children[0].textContent = x.done ? '✅' : '❌';
+      li.children[1].textContent = x.text + (x.repeat ? ' 🔁' : '');
+      li.children[2].textContent = x.done ? t('finished') : t('notFinished');
+      ul.appendChild(li);
+    }
+    const notes = $('day-notes'); notes.textContent = '';
+    for (const x of day.notes) { const li = document.createElement('li'); li.textContent = x; notes.appendChild(li); }
+    $('day-notes-title').hidden = !day.notes.length;
+    $('day-legacy').hidden = !day.legacy;
+  }
+  document.querySelectorAll('.back-today').forEach(b => b.onclick = () => { renderToday(); show('today'); });
+  $('back-archive').onclick = showArchive;
 
   // ---------- 4. settings ----------
   const hh = h => String(h).padStart(2, '0') + ':00';
@@ -364,6 +623,7 @@
     $('set-lang').value = s.lang;
     $('w-on').checked = s.water.on; $('w-every').value = s.water.every; $('w-from').value = s.water.from; $('w-to').value = s.water.to;
     [...$('w-every').options].forEach(o => o.text = `${o.value} ${t('minutes')}`);
+    $('m-on').checked = s.morning.on; $('m-time').value = s.morning.time;
     $('s-on').checked = s.summary.on; $('s-time').value = s.summary.time;
     renderNotifStatus();
     $('admin').hidden = !me.isAdmin;
@@ -376,8 +636,7 @@
       $('settings-msg').textContent = '';
     } catch { $('settings-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); }
   }
-  $('open-settings').onclick = () => { renderSettings(); show('settings'); };
-  $('close-settings').onclick = () => { renderList(); show('today'); };
+  $('close-settings').onclick = () => { renderToday(); show('today'); };
   $('set-lang').onchange = async () => { await saveSettings({ lang: $('set-lang').value }); lang = me.settings.lang; translate(); renderSettings(); };
   const saveWater = async () => {
     const from = +$('w-from').value, to = +$('w-to').value;
@@ -385,8 +644,10 @@
     await saveSettings({ water: { on: $('w-on').checked, every: +$('w-every').value, from, to } }); renderSettings();
   };
   ['w-on', 'w-every', 'w-from', 'w-to'].forEach(id => $(id).onchange = saveWater);
-  const saveSummary = async () => { await saveSettings({ summary: { on: $('s-on').checked, time: $('s-time').value } }); renderSettings(); };
-  $('s-on').onchange = saveSummary; $('s-time').onchange = saveSummary;
+  for (const [k, on, time] of [['summary', 's-on', 's-time'], ['morning', 'm-on', 'm-time']]) {
+    const save = async () => { await saveSettings({ [k]: { on: $(on).checked, time: $(time).value } }); renderSettings(); };
+    $(on).onchange = save; $(time).onchange = save;
+  }
   $('switch').onclick = async () => {
     try { const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription(); await sub?.unsubscribe(); } catch {}
     try { await api('/logout', 'POST'); } catch {}
@@ -455,23 +716,38 @@
   // ---------- refresh: every 20 s, on return, and pull-to-refresh ----------
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { pull(); checkAppUpdate(); }
-    else if (pushTimer) push(true);
+    else if (pushTimer) push();
   });
   window.addEventListener('online', pull);
   setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 20000);
 
+  // Touch: swipe right from the left edge opens The Bar, swipe left closes it; pull down from the top refreshes.
   const ptr = $('ptr'), spin = ptr.firstElementChild;
-  let startY = null;
-  addEventListener('touchstart', e => { startY = scrollY <= 0 ? e.touches[0].clientY : null; ptr.style.transition = 'none'; }, { passive: true });
+  let touch = null;
+  addEventListener('touchstart', e => {
+    const p = e.touches[0];
+    touch = { x: p.clientX, y: p.clientY, dx: 0, dy: 0, mode: null, top: scrollY <= 0 };
+    ptr.style.transition = 'none';
+  }, { passive: true });
   addEventListener('touchmove', e => {
-    if (startY === null) return;
-    const d = Math.max(0, e.touches[0].clientY - startY);
-    ptr.style.height = Math.min(d / 2, 70) + 'px';
-    spin.style.transform = `rotate(${d * 2}deg)`;
+    if (!touch) return;
+    const p = e.touches[0];
+    touch.dx = p.clientX - touch.x; touch.dy = p.clientY - touch.y;
+    if (!touch.mode && Math.hypot(touch.dx, touch.dy) > 10) touch.mode = Math.abs(touch.dx) > Math.abs(touch.dy) ? 'side' : 'down';
+    if (touch.mode === 'down' && touch.top && $('bar').hidden) {
+      const d = Math.max(0, touch.dy);
+      ptr.style.height = Math.min(d / 2, 70) + 'px';
+      spin.style.transform = `rotate(${d * 2}deg)`;
+    }
   }, { passive: true });
   addEventListener('touchend', async () => {
-    if (startY === null) return;
-    startY = null; ptr.style.transition = ''; spin.style.transform = '';
+    if (!touch) return;
+    const { mode, dx, x } = touch; touch = null;
+    ptr.style.transition = ''; spin.style.transform = '';
+    if (mode === 'side') {
+      if ($('bar').hidden && x < 40 && dx > 60) openBar();
+      else if (!$('bar').hidden && dx < -60) closeBar();
+    }
     if (parseFloat(ptr.style.height) >= 60) {
       ptr.classList.add('loading'); ptr.style.height = '50px';
       await Promise.all([pull(), checkAppUpdate(), new Promise(r => setTimeout(r, 600))]); // keep the spinner visible long enough to see
@@ -482,7 +758,7 @@
 
   // ---------- start ----------
   translate();
-  if (token && me && state) { renderList(); show('today'); pull(); }
+  if (token && me && days) { show('today'); renderToday(); maybePopup(); pull(); }
   else if (token) pull();
   else showPick();
 </script>

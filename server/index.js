@@ -6,16 +6,37 @@ const LOCK_AFTER = 5, LOCK_MS = 15 * 60 * 1000;
 const EVERY_OPTIONS = [15, 30, 45, 60, 90, 120];
 
 const TEXT = {
-  en: { waterTitle: '💧 Time to drink water', waterBody: 'Have a glass of water.', summaryTitle: '📝 Still to do today', testTitle: 'Notifications are working ✓', testBody: 'You will get your reminders here.' },
-  vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.' },
+  en: { waterTitle: '💧 Time to drink water', waterBody: 'Have a glass of water.', summaryTitle: '📝 Still to do today', testTitle: 'Notifications are working ✓', testBody: 'You will get your reminders here.',
+        morningTitle: '⏩ Moved to today', morningBody: (from, yesterday, list) => `Not finished ${from === yesterday ? 'yesterday' : 'on ' + from}: ${list}` },
+  vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.',
+        morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}` },
 };
 
 export const defaultSettings = lang => ({
   lang, tz: 'Asia/Ho_Chi_Minh',
   water: { on: true, every: 30, from: 9, to: 23 },
   summary: { on: true, time: '22:30' },
+  morning: { on: true, time: '10:00' },
 });
-export const starterData = lang => ({ tasks: [lang === 'vi' ? 'Uống nước' : 'Drink water'], done: {} });
+// A new person has no days yet; the app adds their first "Drink water" task on first open.
+export const starterData = () => ({ days: {} });
+
+// data = { days: { 'YYYY-MM-DD': Day }, popupShown?: date }
+// Day  = { tasks: [{ text, done, repeat }], notes: [text], carried?: [text], from?: date, legacy?: true }
+// The app creates each new day the same way (keep in sync with newDay() in index.html).
+export function newDay(days, date) {
+  const prevKey = Object.keys(days).filter(d => d < date).sort().pop();
+  const prev = days[prevKey];
+  if (!prev) return { tasks: [], notes: [], carried: [] };
+  return {
+    tasks: prev.tasks.filter(t => !t.done || t.repeat).map(t => ({ text: t.text, done: false, repeat: t.repeat })),
+    notes: [],
+    carried: prev.tasks.filter(t => !t.done).map(t => t.text), // unfinished yesterday, shown in the 10am reminder
+    from: prevKey,
+  };
+}
+export const dayFor = (data, date) => data.days[date] || newDay(data.days, date);
+const yesterdayOf = date => new Date(Date.parse(date + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
 
 class HttpError extends Error { constructor(status, code, extra = {}) { super(code); Object.assign(this, { status, code, extra }); } }
 
@@ -78,11 +99,32 @@ async function route(req, env) {
   const me = token && await db.prepare('SELECT p.* FROM sessions s JOIN people p ON p.id = s.person_id WHERE s.token = ?').bind(token).first();
   if (!me) throw new HttpError(401, 'signed-out');
 
-  if (m === 'GET' && p === '/me')
-    return { id: me.id, name: me.name, isAdmin: !!me.is_admin, data: JSON.parse(me.data), settings: JSON.parse(me.settings) };
-  if (m === 'PUT' && p === '/data') {
-    await db.prepare('UPDATE people SET data = ? WHERE id = ?').bind(JSON.stringify(cleanData(body.data)), me.id).run();
+  const data = JSON.parse(me.data);
+  const saveData = () => db.prepare('UPDATE people SET data = ? WHERE id = ?').bind(JSON.stringify(data), me.id).run();
+  if (m === 'GET' && p === '/me') {
+    const recent = Object.fromEntries(Object.keys(data.days).sort().slice(-2).map(d => [d, data.days[d]]));
+    return { id: me.id, name: me.name, isAdmin: !!me.is_admin, settings: JSON.parse(me.settings), recent, popupShown: data.popupShown || null };
+  }
+  if (m === 'PUT' && p === '/day') { // only the newest day can change; older days are the read-only Archive
+    const date = String(body.date);
+    const newest = Object.keys(data.days).sort().pop();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || (newest && date < newest)) throw new HttpError(400, 'day-is-archived');
+    data.days[date] = cleanDay(body.day);
+    if (JSON.stringify(data).length > 1_500_000) throw new HttpError(413, 'too-much-data');
+    await saveData();
     return { ok: true };
+  }
+  if (m === 'PUT' && p === '/popup') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(body.date)) { data.popupShown = body.date; await saveData(); }
+    return { ok: true };
+  }
+  if (m === 'GET' && p === '/archive')
+    return Object.fromEntries(Object.entries(data.days).map(([d, day]) =>
+      [d, { done: day.tasks.filter(t => t.done).length, total: day.tasks.length, notes: day.notes.length }]));
+  if (m === 'GET' && p === '/archive/day') {
+    const day = data.days[new URL(req.url).searchParams.get('date')];
+    if (!day) throw new HttpError(404, 'no-day');
+    return day;
   }
   if (m === 'PUT' && p === '/settings') {
     const settings = cleanSettings(body.settings || {}, JSON.parse(me.settings));
@@ -120,7 +162,7 @@ async function route(req, env) {
       if (await db.prepare('SELECT 1 FROM people WHERE lower(name) = lower(?)').bind(name).first()) throw new HttpError(409, 'name-taken');
       const { n } = await db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM people').first();
       await db.prepare('INSERT INTO people (id, name, sort, data, settings) VALUES (?, ?, ?, ?, ?)')
-        .bind(crypto.randomUUID(), name, n, JSON.stringify(starterData(lang)), JSON.stringify(defaultSettings(lang))).run();
+        .bind(crypto.randomUUID(), name, n, JSON.stringify(starterData()), JSON.stringify(defaultSettings(lang))).run();
       return { ok: true };
     }
     if (m === 'DELETE' && p === '/admin/people') {
@@ -141,12 +183,28 @@ async function hashPin(env, salt, pin) {
   return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function cleanData(d) {
-  const strings = a => Array.isArray(a) && a.every(x => typeof x === 'string' && x.length <= 200);
-  if (!d || !strings(d.tasks) || d.tasks.length > 200 || typeof d.done !== 'object' || d.done === null
-      || !Object.entries(d.done).every(([k, v]) => /^\d{4}-\d{2}-\d{2}$/.test(k) && strings(v))
-      || JSON.stringify(d).length > 200_000) throw new HttpError(400, 'bad-data');
-  return { tasks: d.tasks, done: d.done };
+export function cleanDay(d) {
+  const texts = (a, max, len) => Array.isArray(a) && a.length <= max && a.every(x => typeof x === 'string' && x.length <= len);
+  const isDate = x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x);
+  if (!d || !Array.isArray(d.tasks) || d.tasks.length > 200
+      || !d.tasks.every(t => t && typeof t.text === 'string' && t.text.length <= 200 && typeof t.done === 'boolean' && typeof t.repeat === 'boolean')
+      || !texts(d.notes, 100, 5000) || (d.carried !== undefined && !texts(d.carried, 200, 200)) || (d.from !== undefined && !isDate(d.from)))
+    throw new HttpError(400, 'bad-data');
+  const out = { tasks: d.tasks.map(t => ({ text: t.text, done: t.done, repeat: t.repeat })), notes: d.notes };
+  if (d.carried) out.carried = d.carried;
+  if (d.from) out.from = d.from;
+  if (d.legacy === true) out.legacy = true;
+  return out;
+}
+
+// One-time conversion from the version 7/8 format { tasks, done } to days (used by the migration script).
+export function fromOldFormat(old, today) {
+  const days = {};
+  for (const [d, list] of Object.entries(old.done || {}))
+    if (d < today && list.length) days[d] = { tasks: list.map(text => ({ text, done: true, repeat: true })), notes: [], legacy: true };
+  const doneToday = old.done?.[today] || [];
+  days[today] = { tasks: old.tasks.map(text => ({ text, done: doneToday.includes(text), repeat: true })), notes: [] };
+  return { days };
 }
 
 export function cleanSettings(s, old) {
@@ -160,9 +218,9 @@ export function cleanSettings(s, old) {
     if (EVERY_OPTIONS.includes(w.every)) out.water.every = w.every;
     if (hour(w.from) && hour(w.to) && w.from < w.to) Object.assign(out.water, { from: w.from, to: w.to });
   }
-  if (s.summary) {
-    if (typeof s.summary.on === 'boolean') out.summary.on = s.summary.on;
-    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(s.summary.time)) out.summary.time = s.summary.time;
+  for (const k of ['summary', 'morning']) if (s[k]) {
+    if (typeof s[k].on === 'boolean') out[k].on = s[k].on;
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(s[k].time)) out[k].time = s[k].time;
   }
   return out;
 }
@@ -177,16 +235,20 @@ export function localNow(date, tz) {
 export function dueReminders(person, now) {
   const s = JSON.parse(person.settings), d = JSON.parse(person.data), t = TEXT[s.lang];
   const { date, minutes } = localNow(now, s.tz);
-  const out = { messages: [], summaryDate: null };
+  const out = { messages: [], summaryDate: null, morningDate: null };
   const w = s.water;
   if (w.on && minutes >= w.from * 60 && minutes <= w.to * 60 && (minutes - w.from * 60) % w.every === 0)
     out.messages.push({ title: t.waterTitle, body: t.waterBody, tag: 'water' });
-  const [hh, mm] = s.summary.time.split(':').map(Number), at = hh * 60 + mm;
-  // 15-minute window so a skipped cron run doesn't lose the day's reminder; last_summary stops repeats.
-  if (s.summary.on && person.last_summary !== date && minutes >= at && minutes < at + 15) {
+  // 15-minute window so a skipped cron run doesn't lose the day's reminder; last_* columns stop repeats.
+  const due = (r, last) => { const [hh, mm] = r.time.split(':').map(Number), at = hh * 60 + mm; return r.on && last !== date && minutes >= at && minutes < at + 15; };
+  const today = dayFor(d, date); // the app may not have been opened yet today
+  if (due(s.morning, person.last_morning)) {
+    out.morningDate = date;
+    if (today.carried?.length) out.messages.push({ title: t.morningTitle, body: t.morningBody(today.from, yesterdayOf(date), today.carried.join(', ')), tag: 'morning' });
+  }
+  if (due(s.summary, person.last_summary)) {
     out.summaryDate = date;
-    const doneToday = d.done[date] || [];
-    const left = d.tasks.filter(x => !doneToday.includes(x));
+    const left = today.tasks.filter(x => !x.done).map(x => x.text);
     if (left.length) out.messages.push({ title: t.summaryTitle, body: left.join(', '), tag: 'summary' });
   }
   return out;
@@ -195,10 +257,11 @@ export function dueReminders(person, now) {
 // shortcut: sends one by one inside a single cron run; fine for a family, rework if it grows past ~10 people.
 async function sendReminders(env, now) {
   const db = env.DB;
-  const { results: people } = await db.prepare('SELECT id, data, settings, last_summary FROM people').all();
+  const { results: people } = await db.prepare('SELECT id, data, settings, last_summary, last_morning FROM people').all();
   for (const person of people) {
-    const { messages, summaryDate } = dueReminders(person, now);
+    const { messages, summaryDate, morningDate } = dueReminders(person, now);
     if (summaryDate) await db.prepare('UPDATE people SET last_summary = ? WHERE id = ?').bind(summaryDate, person.id).run();
+    if (morningDate) await db.prepare('UPDATE people SET last_morning = ? WHERE id = ?').bind(morningDate, person.id).run();
     if (!messages.length) continue;
     const { results: subs } = await db.prepare('SELECT endpoint, sub FROM subs WHERE person_id = ?').bind(person.id).all();
     for (const row of subs) for (const msg of messages) {
