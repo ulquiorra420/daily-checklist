@@ -6,56 +6,134 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Daily Checklist</title>
 <style>
-  :root { --bg:#f6f6f3; --card:#fff; --text:#222; --muted:#888; --accent:#2f7d5b; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#161616; --card:#222; --text:#eee; --muted:#999; --accent:#5fc595; } }
+  :root { --bg:#f6f6f3; --card:#fff; --text:#222; --muted:#888; --accent:#2f7d5b; --danger:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161616; --card:#222; --text:#eee; --muted:#999; --accent:#5fc595; --danger:#e57366; } }
   body { margin:0; background:var(--bg); color:var(--text); font:17px/1.4 -apple-system, system-ui, sans-serif; }
   main { max-width:480px; margin:0 auto; padding:24px 16px; }
   h1 { margin:0; font-size:26px; }
+  h2 { font-size:17px; margin:24px 0 8px; }
+  .row { display:flex; align-items:center; gap:8px; }
+  .between { justify-content:space-between; }
+  .muted { color:var(--muted); }
   #date, #progress { color:var(--muted); margin:4px 0 16px; }
   ul { list-style:none; padding:0; margin:0 0 16px; }
-  li { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:12px; padding:14px; margin-bottom:8px; }
+  li, .card { background:var(--card); border-radius:12px; padding:14px; margin-bottom:8px; }
+  li { display:flex; align-items:center; gap:12px; }
   li label { flex:1; display:flex; gap:12px; align-items:center; cursor:pointer; }
   li input { width:22px; height:22px; accent-color:var(--accent); }
   li.done span { text-decoration:line-through; color:var(--muted); }
-  li button { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
+  li button, .icon { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
   form { display:flex; gap:8px; }
-  form input { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
-  form button { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; }
-  #sync { margin-top:32px; padding-top:16px; border-top:1px solid color-mix(in srgb, var(--muted) 40%, transparent); font-size:14px; color:var(--muted); }
-  #sync p { margin:0 0 8px; }
+  input[type=text], input[type=password], input[type=time], select { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  button.main { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; cursor:pointer; }
+  .person { display:block; width:100%; text-align:left; font-size:20px; padding:18px; border:0; background:var(--card); color:var(--text); border-radius:12px; margin-bottom:10px; cursor:pointer; }
+  #pin-input { font-size:32px; letter-spacing:16px; text-align:center; }
+  .msg { min-height:1.4em; color:var(--danger); }
+  .card label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
+  .card select, .card input[type=time] { flex:0 0 auto; padding:8px; }
+  .card input[type=checkbox] { width:22px; height:22px; accent-color:var(--accent); }
+  .link { background:none; border:0; padding:0; color:var(--accent); font-size:15px; cursor:pointer; text-decoration:underline; }
+  .link.danger { color:var(--danger); }
+  footer { margin-top:32px; font-size:14px; color:var(--muted); }
+  footer p { margin:0 0 6px; }
   [hidden] { display:none !important; }
   #ptr { height:0; overflow:hidden; display:flex; justify-content:center; align-items:center; transition:height .2s; }
   #ptr .spin { width:24px; height:24px; border:3px solid var(--muted); border-top-color:var(--accent); border-radius:50%; }
   #ptr.loading .spin { animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
-  .link { background:none; border:0; padding:0; color:var(--accent); font-size:14px; cursor:pointer; text-decoration:underline; }
 </style>
 </head>
 <body>
 <div id="ptr" aria-hidden="true"><div class="spin"></div></div>
 <main>
-  <h1>Today</h1>
-  <p id="date"></p>
-  <ul id="list"></ul>
-  <p id="progress"></p>
-  <form id="add">
-    <input id="name" placeholder="Add a daily task…" aria-label="New task" required>
-    <button>Add</button>
-  </form>
-
-  <section id="sync">
-    <p id="sync-status"></p>
-    <form id="connect">
-      <input id="token" type="password" autocomplete="off" placeholder="Paste your GitHub key" aria-label="GitHub key">
-      <button>Connect</button>
-    </form>
-    <button id="disconnect" class="link">Turn off sync on this device</button>
-    <p style="margin-top:12px">App version <span id="ver"></span> · pull down to check for changes</p>
+  <!-- 1. Who are you? -->
+  <section id="pick" hidden>
+    <h1>Who are you? · Bạn là ai?</h1>
+    <p class="msg" id="pick-msg"></p>
+    <div id="people"></div>
   </section>
+
+  <!-- 2. PIN -->
+  <section id="pin" hidden>
+    <button class="link" id="pin-back"></button>
+    <h1 id="pin-name" style="margin-top:16px"></h1>
+    <p id="pin-title"></p>
+    <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-labelledby="pin-title">
+    <p class="msg" id="pin-msg" role="alert"></p>
+  </section>
+
+  <!-- 3. Today's list -->
+  <section id="today" hidden>
+    <div class="row between">
+      <h1 data-t="today"></h1>
+      <button class="icon" id="open-settings" aria-label="Settings">⚙︎</button>
+    </div>
+    <p id="date"></p>
+    <ul id="list"></ul>
+    <p id="progress"></p>
+    <form id="add">
+      <input id="name" type="text" required>
+      <button class="main" data-t="add"></button>
+    </form>
+  </section>
+
+  <!-- 4. Settings -->
+  <section id="settings" hidden>
+    <div class="row between">
+      <h1 data-t="settings"></h1>
+      <button class="main" id="close-settings" data-t="done"></button>
+    </div>
+    <p class="muted" id="settings-who"></p>
+
+    <h2 data-t="language"></h2>
+    <div class="card"><label><span data-t="language"></span>
+      <select id="set-lang"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label></div>
+
+    <h2 data-t="notifications"></h2>
+    <div class="card">
+      <p id="notif-status" class="muted" style="margin:0 0 8px"></p>
+      <button class="main" id="notif-on" data-t="notifOn"></button>
+    </div>
+
+    <h2 data-t="water"></h2>
+    <div class="card">
+      <label><span data-t="on"></span><input type="checkbox" id="w-on"></label>
+      <label><span data-t="every"></span><select id="w-every"></select></label>
+      <label><span data-t="from"></span><select id="w-from"></select></label>
+      <label><span data-t="to"></span><select id="w-to"></select></label>
+    </div>
+
+    <h2 data-t="summary"></h2>
+    <div class="card">
+      <label><span data-t="on"></span><input type="checkbox" id="s-on"></label>
+      <label><span data-t="at"></span><input type="time" id="s-time"></label>
+    </div>
+    <p class="msg" id="settings-msg"></p>
+
+    <div id="admin" hidden>
+      <h2 data-t="admin"></h2>
+      <div class="card">
+        <div id="admin-people"></div>
+        <form id="admin-add" style="margin-top:12px">
+          <input id="admin-name" type="text" maxlength="30" required>
+          <select id="admin-lang" style="flex:0 0 auto"><option value="en">English</option><option value="vi">Tiếng Việt</option></select>
+          <button class="main" data-t="add"></button>
+        </form>
+        <p class="msg" id="admin-msg"></p>
+      </div>
+    </div>
+
+    <p style="margin-top:24px"><button class="link" id="switch" data-t="switchPerson"></button></p>
+  </section>
+
+  <footer>
+    <p id="sync-status"></p>
+    <p><span data-t="version"></span> <span id="ver"></span> · <span data-t="pullHint"></span></p>
+  </footer>
 </main>
 <script>
-  const VERSION = 6; // bump on every release so installed copies update themselves
-  const FILE = 'daily-checklist.json', API = 'https://api.github.com';
+  const VERSION = 7; // bump on every release so installed copies update themselves
+  const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
   // version number; if it is newer, reload from a fresh address (?v=N) that has never been saved.
@@ -67,144 +145,320 @@
     } catch {} // offline: try again next time
   }
   checkAppUpdate();
-  const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time; a function so it rolls over past midnight
-  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+
+  const T = {
+    en: {
+      today: 'Today', add: 'Add', addPlaceholder: 'Add a daily task…', del: 'Delete?', sure: 'Sure?',
+      progress: (n, t) => `${n} of ${t} done`, noTasks: 'No tasks yet.',
+      enterPin: 'Enter your PIN', choosePin: 'Choose a 4-digit PIN', againPin: 'Type the same PIN again',
+      pinMismatch: "The PINs didn't match. Try again.", wrongPin: n => `Wrong PIN. ${n} ${n === 1 ? 'try' : 'tries'} left.`,
+      locked: m => `Too many wrong tries. Try again in ${m} minutes.`, back: '← Back',
+      settings: 'Settings', done: 'Done', language: 'Language', notifications: 'Notifications',
+      notifOn: 'Turn on notifications', notifEnabled: 'Notifications are on for this device ✓', notifOff: 'Notifications are off on this device.',
+      notifNeedsHome: 'To get notifications on iPhone, open the app from its Home Screen icon (iOS 16.4 or newer).',
+      notifDenied: 'Notifications are blocked. Turn them on in iPhone Settings → Notifications → Daily Checklist.',
+      notifError: 'Could not turn on notifications. Try again.',
+      water: 'Water reminder', on: 'On', every: 'Every', minutes: 'min', from: 'From', to: 'Until',
+      summary: '"Still to do" reminder', at: 'At', switchPerson: 'Switch person',
+      admin: 'Family (admin)', resetPin: 'Reset PIN', resetDone: n => `${n} will choose a new PIN next time.`, remove: 'Remove',
+      namePlaceholder: 'Name', nameTaken: 'That name is already used.', fromTo: '"From" must be earlier than "Until".',
+      offline: 'Offline. Changes will sync when you are back online.', syncing: 'Syncing…', synced: 'Saved ✓',
+      syncProblem: 'Could not reach the server. Will try again.', version: 'App version', pullHint: 'pull down to check for changes',
+      signedInAs: n => `Signed in as ${n}`,
+    },
+    vi: {
+      today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc hằng ngày…', del: 'Xoá?', sure: 'Chắc chưa?',
+      progress: (n, t) => `Đã xong ${n}/${t}`, noTasks: 'Chưa có việc nào.',
+      enterPin: 'Nhập mã PIN của bạn', choosePin: 'Chọn mã PIN 4 số', againPin: 'Nhập lại mã PIN một lần nữa',
+      pinMismatch: 'Hai mã PIN không khớp. Thử lại nhé.', wrongPin: n => `Sai mã PIN. Còn ${n} lần thử.`,
+      locked: m => `Sai quá nhiều lần. Thử lại sau ${m} phút.`, back: '← Quay lại',
+      settings: 'Cài đặt', done: 'Xong', language: 'Ngôn ngữ', notifications: 'Thông báo',
+      notifOn: 'Bật thông báo', notifEnabled: 'Đã bật thông báo trên máy này ✓', notifOff: 'Thông báo chưa bật trên máy này.',
+      notifNeedsHome: 'Để nhận thông báo trên iPhone, hãy mở ứng dụng từ biểu tượng trên Màn hình chính (iOS 16.4 trở lên).',
+      notifDenied: 'Thông báo đang bị chặn. Hãy bật trong Cài đặt iPhone → Thông báo → Daily Checklist.',
+      notifError: 'Không bật được thông báo. Thử lại nhé.',
+      water: 'Nhắc uống nước', on: 'Bật', every: 'Mỗi', minutes: 'phút', from: 'Từ', to: 'Đến',
+      summary: 'Nhắc việc chưa làm', at: 'Lúc', switchPerson: 'Đổi người dùng',
+      admin: 'Gia đình (quản trị)', resetPin: 'Đặt lại PIN', resetDone: n => `${n} sẽ chọn mã PIN mới ở lần mở tới.`, remove: 'Xoá',
+      namePlaceholder: 'Tên', nameTaken: 'Tên này đã có người dùng.', fromTo: 'Giờ "Từ" phải sớm hơn giờ "Đến".',
+      offline: 'Mất mạng. Sẽ đồng bộ khi có mạng lại.', syncing: 'Đang đồng bộ…', synced: 'Đã lưu ✓',
+      syncProblem: 'Không kết nối được máy chủ. Sẽ thử lại.', version: 'Phiên bản', pullHint: 'kéo xuống để cập nhật',
+      signedInAs: n => `Đang dùng: ${n}`,
+    },
+  };
+
   const $ = id => document.getElementById(id);
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time
+  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // state = { tasks: [names], done: { 'YYYY-MM-DD': [names] } }
-  let state = load('state', null);
-  if (!state) { // carry over lists saved by the first version of the app
-    const done = {};
-    for (const k of Object.keys(localStorage)) if (k.startsWith('done-')) done[k.slice(5)] = load(k, []);
-    state = { tasks: load('tasks', ['Drink water', 'Exercise', 'Read 10 pages']), done };
+  let token = localStorage.getItem('session');
+  let me = load('me', null);            // { id, name, isAdmin, settings }
+  let state = load('list', null);       // { tasks, done }
+  let pushTimer = null;
+  let lang = me?.settings?.lang || (navigator.language.startsWith('vi') ? 'vi' : 'en');
+  const t = k => T[lang][k];
+
+  function show(id) { for (const s of ['pick', 'pin', 'today', 'settings']) $(s).hidden = s !== id; }
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-t]').forEach(el => el.textContent = t(el.dataset.t));
+    $('name').placeholder = t('addPlaceholder');
+    $('admin-name').placeholder = t('namePlaceholder');
+    $('ver').textContent = VERSION;
   }
+  function status(msg) { $('sync-status').textContent = msg || ''; }
+
+  // ---------- server ----------
+  async function api(path, method = 'GET', body) {
+    const r = await fetch(API + path, { method, cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: body && JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401 && data.error === 'signed-out') { signOut(); throw Object.assign(new Error('signed-out'), { data }); }
+    if (!r.ok) throw Object.assign(new Error(data.error || 'error'), { data });
+    return data;
+  }
+
+  // ---------- 1. who are you ----------
+  let people = [];
+  async function showPick() {
+    lang = navigator.language.startsWith('vi') ? 'vi' : 'en'; translate();
+    show('pick'); status('');
+    $('people').textContent = '';
+    try { people = await api('/people'); $('pick-msg').textContent = ''; }
+    catch { $('pick-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); return; }
+    for (const p of people) {
+      const b = document.createElement('button');
+      b.className = 'person'; b.textContent = p.name;
+      b.onclick = () => showPin(p);
+      $('people').appendChild(b);
+    }
+  }
+
+  // ---------- 2. PIN ----------
+  let pinPerson = null, firstPin = null;
+  function showPin(p) {
+    pinPerson = p; firstPin = null; lang = p.lang; translate();
+    $('pin-back').textContent = t('back');
+    $('pin-name').textContent = p.name;
+    $('pin-title').textContent = t(p.hasPin ? 'enterPin' : 'choosePin');
+    $('pin-msg').textContent = '';
+    $('pin-input').value = '';
+    show('pin'); $('pin-input').focus();
+  }
+  $('pin-back').onclick = showPick;
+  $('pin-input').oninput = async e => {
+    const el = e.target;
+    el.value = el.value.replace(/\D/g, '').slice(0, 4);
+    if (el.value.length < 4) return;
+    const pin = el.value; el.value = '';
+    if (!pinPerson.hasPin && firstPin === null) { firstPin = pin; $('pin-title').textContent = t('againPin'); $('pin-msg').textContent = ''; return; }
+    if (!pinPerson.hasPin && pin !== firstPin) { firstPin = null; $('pin-title').textContent = t('choosePin'); $('pin-msg').textContent = t('pinMismatch'); return; }
+    el.disabled = true;
+    try {
+      token = (await api('/login', 'POST', { id: pinPerson.id, pin })).token;
+      localStorage.setItem('session', token);
+      ['gh-token', 'gist-id', 'dirty', 'state', 'tasks'].forEach(k => localStorage.removeItem(k)); // old GitHub-sync storage
+      for (const k of Object.keys(localStorage)) if (k.startsWith('done-')) localStorage.removeItem(k);
+      state = null;
+      await pull();
+      relinkNotifications();
+    } catch (err) {
+      const d = err.data || {};
+      if (d.error === 'wrong-pin') $('pin-msg').textContent = t('wrongPin')(d.triesLeft);
+      else if (d.error === 'locked') $('pin-msg').textContent = t('locked')(d.minutes);
+      else if (d.error === 'pin-already-set') { pinPerson.hasPin = true; showPin(pinPerson); }
+      else $('pin-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline');
+    } finally { el.disabled = false; el.focus(); }
+  };
+
+  function signOut() {
+    token = me = state = null;
+    ['session', 'me', 'list', 'dirty'].forEach(k => localStorage.removeItem(k));
+    showPick();
+  }
+
+  // ---------- 3. today's list ----------
   const doneToday = () => state.done[today()] || [];
-
   function change() {
-    localStorage.setItem('state', JSON.stringify(state));
-    localStorage.setItem('dirty', '1'); // has changes GitHub hasn't got yet
-    render();
-    schedulePush();
+    localStorage.setItem('list', JSON.stringify(state));
+    localStorage.setItem('dirty', '1'); // has changes the server hasn't got yet
+    renderList();
+    clearTimeout(pushTimer); pushTimer = setTimeout(push, 800);
   }
-
-  function render() {
-    $('date').textContent = new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+  function renderList() {
+    $('date').textContent = new Date().toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     const list = $('list');
-    list.innerHTML = '';
-    state.tasks.forEach(t => {
+    list.textContent = '';
+    state.tasks.forEach(task => {
       const li = document.createElement('li');
-      const isDone = doneToday().includes(t);
+      const isDone = doneToday().includes(task);
       li.className = isDone ? 'done' : '';
       li.innerHTML = '<label><input type="checkbox"><span></span></label><button aria-label="Delete">×</button>';
-      li.querySelector('span').textContent = t; // textContent, so typed text can't inject HTML
+      li.querySelector('span').textContent = task; // textContent, so typed text can't inject HTML
       const box = li.querySelector('input');
       box.checked = isDone;
       box.onchange = () => {
-        state.done[today()] = box.checked ? [...doneToday(), t] : doneToday().filter(x => x !== t);
+        state.done[today()] = box.checked ? [...doneToday(), task] : doneToday().filter(x => x !== task);
         change();
       };
-      // Tap once to arm, tap again to delete (pop-up confirm() is blocked in some browsers/app views).
-      const del = li.querySelector('button');
-      del.onclick = () => {
-        if (del.textContent !== 'Delete?') { del.textContent = 'Delete?'; del.style.color = '#c0392b'; del.style.fontSize = '15px'; return; }
-        state.tasks = state.tasks.filter(x => x !== t); change();
-      };
+      armedButton(li.querySelector('button'), t('del'), () => { state.tasks = state.tasks.filter(x => x !== task); change(); });
       list.appendChild(li);
     });
-    const n = state.tasks.filter(t => doneToday().includes(t)).length;
-    $('progress').textContent = state.tasks.length ? `${n} of ${state.tasks.length} done` + (n === state.tasks.length ? ' 🎉' : '') : 'No tasks yet.';
+    const n = state.tasks.filter(x => doneToday().includes(x)).length;
+    $('progress').textContent = state.tasks.length ? t('progress')(n, state.tasks.length) + (n === state.tasks.length ? ' 🎉' : '') : t('noTasks');
   }
-
+  // Tap once to arm, tap again to act (pop-up confirm() is blocked in some app views).
+  function armedButton(btn, armedText, action) {
+    btn.onclick = () => {
+      if (btn.dataset.armed) return action();
+      btn.dataset.armed = 1; btn.textContent = armedText; btn.style.color = 'var(--danger)'; btn.style.fontSize = '15px';
+    };
+  }
   $('add').onsubmit = e => {
     e.preventDefault();
-    const t = $('name').value.trim();
-    if (t && !state.tasks.includes(t)) { state.tasks.push(t); change(); }
+    const task = $('name').value.trim();
+    if (task && !state.tasks.includes(task)) { state.tasks.push(task); change(); }
     $('name').value = '';
   };
 
-  // ---- Sync through a private GitHub Gist. Last save wins if both devices edit at the same moment. ----
-  let token = localStorage.getItem('gh-token');
-  let gistId = localStorage.getItem('gist-id');
-  let pushTimer = null;
-
-  function showSync(msg) {
-    $('sync-status').textContent = token ? msg : 'Sync is off. Your list is saved on this device only.';
-    $('connect').hidden = !!token;
-    $('disconnect').hidden = !token;
-  }
-
-  async function gh(path, opts = {}) {
-    const r = await fetch(API + path, { ...opts, cache: 'no-store',
-      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' } });
-    if (r.status === 401) throw new Error('GitHub did not accept the key (it may have expired). Turn off sync and connect with a new key.');
-    if (r.status === 404 && path.startsWith('/gists/')) { gistId = null; localStorage.removeItem('gist-id'); }
-    if (!r.ok) throw new Error('GitHub error ' + r.status);
-    return r.json();
-  }
-
-  async function findOrCreateGist() {
-    const mine = await gh('/gists?per_page=100');
-    const found = mine.find(g => g.files[FILE]);
-    if (found) { localStorage.removeItem('dirty'); return found.id; } // joining an existing list: GitHub's copy wins
-    const made = await gh('/gists', { method: 'POST', body: JSON.stringify({
-      description: 'Daily checklist data', public: false, files: { [FILE]: { content: JSON.stringify(state) } } }) });
-    localStorage.removeItem('dirty');
-    return made.id;
-  }
-
+  // ---------- sync ----------
   async function pull() {
-    if (!token || !navigator.onLine) return showSync('Offline. Changes will sync when you are back online.');
+    if (!token) return;
+    if (!navigator.onLine) return status(t('offline'));
     try {
-      showSync('Syncing…');
-      if (!gistId) { gistId = await findOrCreateGist(); localStorage.setItem('gist-id', gistId); }
       if (localStorage.getItem('dirty')) return push(); // don't overwrite changes made offline
-      const g = await gh('/gists/' + gistId);
-      const remote = JSON.parse(g.files[FILE].content);
-      if (!Array.isArray(remote.tasks) || typeof remote.done !== 'object') throw new Error('Saved data looks broken');
-      state = remote;
-      localStorage.setItem('state', JSON.stringify(state));
-      render();
-      showSync('Synced with GitHub ✓');
-    } catch (e) { showSync('Sync problem: ' + e.message); }
+      const r = await api('/me');
+      me = { id: r.id, name: r.name, isAdmin: r.isAdmin, settings: r.settings };
+      state = r.data;
+      localStorage.setItem('me', JSON.stringify(me));
+      localStorage.setItem('list', JSON.stringify(state));
+      if (me.settings.tz !== deviceTz) saveSettings({ tz: deviceTz }); // reminders follow this phone's time zone
+      if (lang !== me.settings.lang) { lang = me.settings.lang; translate(); }
+      if ($('settings').hidden) { renderList(); show('today'); }
+      status(t('synced'));
+    } catch (e) { if (e.message !== 'signed-out') status(t('syncProblem')); }
   }
-
   async function push(keepalive = false) {
     clearTimeout(pushTimer); pushTimer = null;
-    if (!token || !gistId) return pull();
+    if (!token) return;
     try {
-      showSync('Saving…');
-      await gh('/gists/' + gistId, { method: 'PATCH', keepalive,
-        body: JSON.stringify({ files: { [FILE]: { content: JSON.stringify(state) } } }) });
+      status(t('syncing'));
+      await fetch(API + '/data', { method: 'PUT', keepalive, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ data: state }) })
+        .then(r => { if (!r.ok) throw new Error(r.status); });
       localStorage.removeItem('dirty');
-      showSync('Synced with GitHub ✓');
-    } catch (e) { showSync('Sync problem: ' + e.message); }
+      status(t('synced'));
+    } catch { status(navigator.onLine ? t('syncProblem') : t('offline')); }
   }
 
-  function schedulePush() { if (token) { clearTimeout(pushTimer); pushTimer = setTimeout(push, 800); } }
+  // ---------- 4. settings ----------
+  const hh = h => String(h).padStart(2, '0') + ':00';
+  for (const m of [15, 30, 45, 60, 90, 120]) $('w-every').add(new Option(m, m));
+  for (let h = 0; h < 24; h++) { $('w-from').add(new Option(hh(h), h)); $('w-to').add(new Option(hh(h), h)); }
 
-  $('connect').onsubmit = e => {
+  function renderSettings() {
+    const s = me.settings;
+    $('settings-who').textContent = t('signedInAs')(me.name);
+    $('set-lang').value = s.lang;
+    $('w-on').checked = s.water.on; $('w-every').value = s.water.every; $('w-from').value = s.water.from; $('w-to').value = s.water.to;
+    [...$('w-every').options].forEach(o => o.text = `${o.value} ${t('minutes')}`);
+    $('s-on').checked = s.summary.on; $('s-time').value = s.summary.time;
+    renderNotifStatus();
+    $('admin').hidden = !me.isAdmin;
+    if (me.isAdmin) renderAdmin();
+  }
+  async function saveSettings(change) {
+    try {
+      me.settings = await api('/settings', 'PUT', { settings: change });
+      localStorage.setItem('me', JSON.stringify(me));
+      $('settings-msg').textContent = '';
+    } catch { $('settings-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); }
+  }
+  $('open-settings').onclick = () => { renderSettings(); show('settings'); };
+  $('close-settings').onclick = () => { renderList(); show('today'); };
+  $('set-lang').onchange = async () => { await saveSettings({ lang: $('set-lang').value }); lang = me.settings.lang; translate(); renderSettings(); };
+  const saveWater = async () => {
+    const from = +$('w-from').value, to = +$('w-to').value;
+    if (from >= to) { $('settings-msg').textContent = t('fromTo'); return renderSettings(); }
+    await saveSettings({ water: { on: $('w-on').checked, every: +$('w-every').value, from, to } }); renderSettings();
+  };
+  ['w-on', 'w-every', 'w-from', 'w-to'].forEach(id => $(id).onchange = saveWater);
+  const saveSummary = async () => { await saveSettings({ summary: { on: $('s-on').checked, time: $('s-time').value } }); renderSettings(); };
+  $('s-on').onchange = saveSummary; $('s-time').onchange = saveSummary;
+  $('switch').onclick = async () => {
+    try { const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription(); await sub?.unsubscribe(); } catch {}
+    try { await api('/logout', 'POST'); } catch {}
+    signOut();
+  };
+
+  // ---------- notifications ----------
+  const canPush = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  function renderNotifStatus() {
+    const s = $('notif-status'), b = $('notif-on');
+    if (!canPush()) { s.textContent = t('notifNeedsHome'); b.hidden = true; return; }
+    if (Notification.permission === 'denied') { s.textContent = t('notifDenied'); b.hidden = true; return; }
+    const on = localStorage.getItem('notif') === me.id && Notification.permission === 'granted';
+    s.textContent = on ? t('notifEnabled') : t('notifOff');
+    b.hidden = on;
+  }
+  async function subscribe(test) {
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    const { key } = await api('/vapid');
+    const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+    await api('/subscribe', 'POST', { subscription: sub.toJSON(), test });
+    localStorage.setItem('notif', me.id);
+  }
+  $('notif-on').onclick = async () => {
+    try {
+      if (await Notification.requestPermission() !== 'granted') return renderNotifStatus();
+      await subscribe(true); // the server sends a test notification
+    } catch { $('notif-status').textContent = t('notifError'); return; }
+    renderNotifStatus();
+  };
+  // After switching person on a phone that already allows notifications, send reminders to the new person.
+  async function relinkNotifications() {
+    if (canPush() && Notification.permission === 'granted' && localStorage.getItem('notif') && me) {
+      try { await subscribe(false); } catch {}
+    }
+  }
+
+  // ---------- admin ----------
+  async function renderAdmin() {
+    const box = $('admin-people');
+    try { people = await api('/people'); } catch { return; }
+    box.textContent = '';
+    for (const p of people) {
+      const row = document.createElement('div');
+      row.className = 'row between'; row.style.margin = '8px 0';
+      row.innerHTML = '<span></span><span class="row" style="gap:16px"><button class="link"></button><button class="link danger"></button></span>';
+      row.querySelector('span').textContent = p.name;
+      const [reset, remove] = row.querySelectorAll('button');
+      reset.textContent = t('resetPin');
+      armedButton(reset, t('sure'), async () => { await api('/admin/reset-pin', 'POST', { id: p.id }); $('admin-msg').textContent = t('resetDone')(p.name); renderAdmin(); });
+      if (p.id === me.id) remove.remove();
+      else { remove.textContent = t('remove'); armedButton(remove, t('sure'), async () => { await api('/admin/people', 'DELETE', { id: p.id }); renderAdmin(); }); }
+      box.appendChild(row);
+    }
+  }
+  $('admin-add').onsubmit = async e => {
     e.preventDefault();
-    const t = $('token').value.trim();
-    if (!t) return;
-    token = t; localStorage.setItem('gh-token', t); $('token').value = '';
-    pull();
-  };
-  $('disconnect').onclick = () => {
-    token = gistId = null;
-    localStorage.removeItem('gh-token'); localStorage.removeItem('gist-id');
-    showSync();
+    try {
+      await api('/admin/people', 'POST', { name: $('admin-name').value.trim(), lang: $('admin-lang').value });
+      $('admin-name').value = ''; $('admin-msg').textContent = ''; renderAdmin();
+    } catch (err) { $('admin-msg').textContent = err.message === 'name-taken' ? t('nameTaken') : t('syncProblem'); }
   };
 
-  // Re-sync whenever the app comes back on screen; save right away if it is being closed.
+  // ---------- refresh: every 20 s, on return, and pull-to-refresh ----------
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { render(); pull(); checkAppUpdate(); }
+    if (document.visibilityState === 'visible') { pull(); checkAppUpdate(); }
     else if (pushTimer) push(true);
   });
   window.addEventListener('online', pull);
-  // Check for changes from other devices every 20 s while the app is on screen (~180 requests/hour, well under GitHub's 5000).
   setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 20000);
 
-  // Pull to refresh: drag down from the top of the page and let go to check for changes now.
   const ptr = $('ptr'), spin = ptr.firstElementChild;
   let startY = null;
   addEventListener('touchstart', e => { startY = scrollY <= 0 ? e.touches[0].clientY : null; ptr.style.transition = 'none'; }, { passive: true });
@@ -225,10 +479,11 @@
     ptr.style.height = '0';
   });
 
-  $('ver').textContent = VERSION;
-  render();
-  showSync('Syncing…');
-  pull();
+  // ---------- start ----------
+  translate();
+  if (token && me && state) { renderList(); show('today'); pull(); }
+  else if (token) pull();
+  else showPick();
 </script>
 </body>
 </html>

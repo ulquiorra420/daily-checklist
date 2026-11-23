@@ -1,0 +1,10 @@
+{
+  "name": "daily-checklist",
+  "main": "index.js",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "daily-checklist", "database_id": "10ced201-a486-45fb-9ce5-6ee3039f2e7d" }],
+  // Runs every minute to send water / "still to do" reminders.
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "VAPID_PUBLIC": "BFsR_g1_A6Hzz3J41JpAogbTyCXEyVEgD60F7_881hhh2aHbMaptJ3qZQAE4XeJ4zVN4V-SpRHzpKyfuFpU1v60", "VAPID_SUBJECT": "https://ulquiorra420.github.io" }
+  // Secrets (not in code): VAPID_PRIVATE_JWK, PIN_PEPPER — set with: wrangler secret put
+}
