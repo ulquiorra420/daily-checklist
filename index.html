@@ -54,7 +54,7 @@
   </section>
 </main>
 <script>
-  const VERSION = 5; // bump on every release so installed copies update themselves
+  const VERSION = 6; // bump on every release so installed copies update themselves
   const FILE = 'daily-checklist.json', API = 'https://api.github.com';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -219,7 +219,7 @@
     startY = null; ptr.style.transition = ''; spin.style.transform = '';
     if (parseFloat(ptr.style.height) >= 60) {
       ptr.classList.add('loading'); ptr.style.height = '50px';
-      await Promise.all([pull(), new Promise(r => setTimeout(r, 600))]); // keep the spinner visible long enough to see
+      await Promise.all([pull(), checkAppUpdate(), new Promise(r => setTimeout(r, 600))]); // keep the spinner visible long enough to see
       ptr.classList.remove('loading');
     }
     ptr.style.height = '0';
