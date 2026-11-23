@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "checklist", "runtimeExecutable": "python3", "runtimeArgs": ["-m", "http.server", "8765"], "port": 8765 },
+    { "name": "server", "runtimeExecutable": "npx", "runtimeArgs": ["wrangler", "dev", "--port", "8787", "--test-scheduled", "--config", "server/wrangler.jsonc"], "port": 8787 }
+  ]
+}
