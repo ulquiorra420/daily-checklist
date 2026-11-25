@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS people (
   failed INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER NOT NULL DEFAULT 0,
   data TEXT NOT NULL,          -- {"popupShown":date}
-  settings TEXT NOT NULL,      -- {"lang","tz","water":{on,every,from,to},"summary":{on,time},"morning":{on,time}}
+  settings TEXT NOT NULL,      -- {"lang","textSize"?,"tz","water":{on,every,from,to},"summary":{on,time},"morning":{on,time}}
   last_summary TEXT,           -- local date the 'still to do' reminder was last sent
   last_morning TEXT,           -- local date the 10am 'moved to today' reminder was last sent
   last_water TEXT              -- local 'YYYY-MM-DD HH:MM' of the last water reminder sent (so a late cron run catches up once)
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS people (
 CREATE TABLE IF NOT EXISTS days (
   person_id TEXT NOT NULL,
   date TEXT NOT NULL,          -- YYYY-MM-DD in the person's time zone
-  day TEXT NOT NULL,           -- {"tasks":[{text,done,repeat,time?,plan?}],"notes":[...],"carried":[...],"from":date}
+  day TEXT NOT NULL,           -- {"tasks":[{text,done,repeat,time?,plan?,by?}],"notes":[...],"carried":[...],"from":date}
   PRIMARY KEY (person_id, date)
 );
 CREATE TABLE IF NOT EXISTS help (
@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS subs (
 -- "For later" tasks: a reminder at date + time (person's time zone); on that day the app moves it into the list.
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  person_id TEXT NOT NULL,
+  person_id TEXT NOT NULL,     -- whose list it goes on
+  by_id TEXT,                  -- who added it (someone else = "For someone else")
   text TEXT NOT NULL,
   date TEXT NOT NULL,          -- YYYY-MM-DD
   time TEXT NOT NULL,          -- HH:MM

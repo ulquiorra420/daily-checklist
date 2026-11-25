@@ -6,8 +6,9 @@ const T = (text, done = false, repeat = false) => ({ text, done, repeat });
 const person = (lang, tz, data, extra = {}, last = {}) =>
   ({ settings: JSON.stringify({ ...defaultSettings(lang), tz, ...extra }), data: JSON.stringify(data), last_summary: null, last_morning: null, ...last });
 const at = iso => new Date(iso);
-const tags = r => r.messages.map(m => m.tag);
-const msg = (r, tag) => r.messages.find(m => m.tag === tag);
+const kind = tag => tag.replace(/^plan-\d+$/, 'plan'); // each For-later task has its own tag, 'plan-<id>'
+const tags = r => r.messages.map(m => kind(m.tag));
+const msg = (r, tag) => r.messages.find(m => kind(m.tag) === tag);
 
 // ---- rollover at midnight ----
 const days = { '2026-11-24': { tasks: [T('Buy rice', true), T('Call bank'), T('Drink water', true, true), T('Exercise', false, true)], notes: ['busy day'] } };
@@ -138,5 +139,26 @@ assert.deepStrictEqual(cleanDay({ tasks: [{ ...T('a'), time: '15:00', plan: 3 }]
 assert.throws(() => cleanDay({ tasks: [{ ...T('a'), time: '3pm' }], notes: [] }));
 // the next day the carried task is a plain task again
 assert.deepStrictEqual(newDay({ '2026-11-24': { tasks: [{ ...T('Dentist'), time: '15:00', plan: 1 }], notes: [] } }, '2026-11-25').tasks, [T('Dentist')]);
+
+// ---- one tag per kind of reminder, so the phone replaces the old one instead of piling them up ----
+assert.strictEqual(dueReminders(vn, at('2026-11-24T02:00:00Z')).messages[0].tag, 'water');
+const two = dueReminders(withPlans([plan(7, '2026-11-24', '15:00'), plan(8, '2026-11-24', '15:00', { text: 'Gym' })]), vnAt('15:00'));
+assert.deepStrictEqual(two.messages.map(m => m.tag), ['plan-7', 'plan-8']); // two tasks: two separate notifications
+assert.strictEqual(dueReminders(withPlans([plan(7, '2026-11-24', '15:00', { last_slot: 900 })]), vnAt('15:15')).messages[0].tag, 'plan-7'); // repeat replaces
+
+// ---- For someone else: "Added by" in the notification ----
+const forMe = plan(9, '2026-11-24', '16:00', { text: 'Buy groceries', by_name: 'dannyle' });
+const g = dueReminders(withPlans([forMe]), vnAt('16:00'));
+assert.strictEqual(msg(g, 'plan').title, '⏰ Buy groceries'); assert.strictEqual(msg(g, 'plan').body, 'Planned for 16:00 · Added by dannyle');
+assert.strictEqual(msg(dueReminders(withPlans([{ ...forMe, last_slot: 960 }]), vnAt('16:15')), 'plan').body,
+  'Planned for 16:00 · Added by dannyle. If you have finished this task, tick it in the app to stop receiving these notifications.');
+assert.strictEqual(msg(dueReminders(viP(forMe), vnAt('16:00')), 'plan').body, 'Hẹn lúc 16:00 · Thêm bởi dannyle');
+// the task keeps who added it
+assert.deepStrictEqual(cleanDay({ tasks: [{ ...T('Buy groceries'), time: '16:00', plan: 9, by: 'dannyle' }], notes: [] }).tasks[0].by, 'dannyle');
+assert.throws(() => cleanDay({ tasks: [{ ...T('a'), by: 'x'.repeat(31) }], notes: [] }));
+
+// ---- text size setting ----
+assert.strictEqual(cleanSettings({ textSize: 'big' }, base).textSize, 'big');
+assert.strictEqual(cleanSettings({ textSize: 'huge' }, base).textSize, undefined);
 
 console.log('reminders + days OK');

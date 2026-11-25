@@ -26,7 +26,12 @@
   li button, .icon { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; padding:4px; }
   .repeat { font-size:16px !important; opacity:.25; }
   .repeat[aria-pressed=true] { opacity:1; }
-  .when { color:var(--accent); font-size:15px; font-variant-numeric:tabular-nums; margin-right:6px; white-space:nowrap; }
+  .by { display:block; font-size:13px; color:var(--muted); }
+  /* drag to reorder: hold ⠿ and move up or down */
+  .handle { flex:0 0 auto; color:var(--muted); font-size:20px; line-height:1; padding:6px 2px; cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; }
+  li.dragging { box-shadow:0 6px 18px rgba(0,0,0,.3); position:relative; z-index:2; }
+  body.dragging-list, body.dragging-list * { cursor:grabbing !important; user-select:none; -webkit-user-select:none; }
+  .when { display:inline-block; color:var(--accent); font-size:15px; font-variant-numeric:tabular-nums; margin-right:6px; white-space:nowrap; }
   li.done .when { color:var(--muted); }
   /* For today / For later */
   .seg { display:flex; gap:0; margin:0 0 8px; border:1px solid var(--muted); border-radius:10px; overflow:hidden; }
@@ -36,7 +41,7 @@
   #later-row input { padding:10px; }
   #upcoming li { gap:10px; }
   #upcoming .what { flex:1; min-width:0; overflow-wrap:anywhere; }
-  #upcoming .muted { font-size:14px; white-space:nowrap; }
+  #upcoming .muted { display:block; font-size:14px; margin-top:2px; } /* date and time on their own line, under the task */
   form { display:flex; gap:8px; }
   input, select, button, textarea { box-sizing:border-box; font-family:inherit; }
   input[type=text], input[type=password], input[type=time], input[type=date], select, textarea { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
@@ -82,8 +87,19 @@
   .day-btn:disabled { opacity:.45; cursor:default; }
   .day-list li { gap:10px; }
   /* Pop-up */
-  #modal { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
-  #modal .box { background:var(--bg); border-radius:16px; padding:20px; max-width:400px; width:100%; box-sizing:border-box; }
+  #modal, #assign { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
+  #modal .box, #assign .box { background:var(--bg); border-radius:16px; padding:20px; max-width:400px; width:100%; box-sizing:border-box; max-height:100%; overflow-y:auto; }
+  /* For someone else */
+  #assign form.box { display:block; } /* not the side-by-side layout other forms use */
+  #assign-people { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 16px; }
+  #assign-people button { padding:10px 14px; border:1px solid var(--muted); border-radius:20px; background:var(--card); color:var(--text); font-size:16px; cursor:pointer; }
+  #assign-people button[aria-pressed=true] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #assign .field { display:block; margin:0 0 12px; }
+  #assign .field span { display:block; font-size:14px; color:var(--muted); margin-bottom:4px; }
+  #assign .field input { width:100%; }
+  button.wide { display:block; width:100%; padding:10px; margin:0 0 8px; border:1px solid var(--muted); border-radius:10px; background:var(--card); color:var(--text); font-size:15px; cursor:pointer; }
+  /* Text size: Big */
+  html.big body { zoom:1.25; }
   #modal ul { margin:12px 0; }
   #modal li { padding:10px 14px; }
   footer { margin-top:32px; font-size:14px; color:var(--muted); }
@@ -118,6 +134,24 @@
   </div>
 </div>
 
+<!-- "For someone else" pop-up -->
+<div id="assign" role="dialog" aria-modal="true" aria-labelledby="assign-title" hidden>
+  <form class="box" id="assign-form">
+    <h2 id="assign-title" style="margin-top:0" data-t="forOther"></h2>
+    <p class="muted" style="margin:0" data-t="whoFor"></p>
+    <div id="assign-people"></div>
+    <label class="field"><span data-t="taskName"></span><input type="text" id="assign-text" maxlength="200"></label>
+    <label class="field"><span data-t="date"></span><input type="date" id="assign-date"></label>
+    <label class="field"><span data-t="time"></span><input type="time" id="assign-time"></label>
+    <p class="muted" style="font-size:14px;margin:0 0 8px" data-t="assignHint"></p>
+    <p class="msg" id="assign-msg" role="alert"></p>
+    <div class="row" style="justify-content:flex-end;gap:16px">
+      <button type="button" class="link" id="assign-cancel" data-t="cancel"></button>
+      <button class="main" data-t="send"></button>
+    </div>
+  </form>
+</div>
+
 <main>
   <!-- 1. Who are you? -->
   <section id="pick" hidden>
@@ -148,6 +182,7 @@
       <button type="button" id="for-today" aria-pressed="true" data-t="forToday"></button>
       <button type="button" id="for-later" aria-pressed="false" data-t="forLater"></button>
     </div>
+    <button type="button" class="wide" id="for-other"></button>
     <form id="add">
       <input id="name" type="text" required maxlength="200">
       <button type="button" class="toggle" id="add-repeat" aria-pressed="false">🔁</button>
@@ -183,6 +218,10 @@
     <h2 data-t="language"></h2>
     <div class="card"><label><span data-t="language"></span>
       <select id="set-lang"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label></div>
+
+    <h2 data-t="textSize"></h2>
+    <div class="card"><label><span data-t="textSize"></span>
+      <select id="set-size"><option value="standard"></option><option value="big"></option></select></label></div>
 
     <h2 data-t="notifications"></h2>
     <div class="card">
@@ -277,7 +316,7 @@
   </footer>
 </main>
 <script>
-  const VERSION = 12; // bump on every release so installed copies update themselves
+  const VERSION = 13; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -325,6 +364,11 @@
       forToday: 'For today', forLater: 'For later', upcoming: 'Upcoming',
       laterHint: '⏰ You will get a notification at this time, then every 15 minutes until you tick it off (until midnight). On that day it joins your list.',
       needWhen: 'Choose a date and a time.', pastWhen: 'That time has already passed.', tooMany: 'Too many planned tasks.',
+      textSize: 'Text size', big: 'Big', standard: 'Standard', drag: 'Hold and drag to move',
+      forOther: '👤 For someone else', whoFor: 'Who is it for?', taskName: 'Task', date: 'Date', time: 'Time', cancel: 'Cancel',
+      assignHint: '⏰ Their phone gets a notification at this time, then every 15 minutes until they tick it off (until midnight).',
+      pickPerson: 'Choose who it is for.', needText: 'Write the task.', addedBy: n => `Added by ${n}`, forName: n => `Sent to ${n}`,
+      assignSent: n => `Sent to ${n} ✓`,
     },
     vi: {
       today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc…', del: 'Xoá?', sure: 'Chắc chưa?',
@@ -359,6 +403,11 @@
       forToday: 'Cho hôm nay', forLater: 'Để sau', upcoming: 'Sắp tới',
       laterHint: '⏰ Bạn sẽ nhận thông báo vào giờ này, rồi cứ 15 phút một lần cho đến khi đánh dấu xong (đến nửa đêm). Đến ngày đó, việc sẽ vào danh sách của bạn.',
       needWhen: 'Hãy chọn ngày và giờ.', pastWhen: 'Giờ này đã qua rồi.', tooMany: 'Có quá nhiều việc đã hẹn.',
+      textSize: 'Cỡ chữ', big: 'Lớn', standard: 'Bình thường', drag: 'Giữ và kéo để di chuyển',
+      forOther: '👤 Cho người khác', whoFor: 'Việc này cho ai?', taskName: 'Việc cần làm', date: 'Ngày', time: 'Giờ', cancel: 'Huỷ',
+      assignHint: '⏰ Điện thoại của họ sẽ nhận thông báo vào giờ này, rồi cứ 15 phút một lần cho đến khi họ đánh dấu xong (đến nửa đêm).',
+      pickPerson: 'Hãy chọn người nhận.', needText: 'Hãy viết việc cần làm.', addedBy: n => `Thêm bởi ${n}`, forName: n => `Gửi cho ${n}`,
+      assignSent: n => `Đã gửi cho ${n} ✓`,
     },
   };
 
@@ -395,6 +444,8 @@
     $('admin-name').placeholder = t('namePlaceholder');
     $('add-repeat').setAttribute('aria-label', t('repeat'));
     $('ver').textContent = VERSION;
+    $('for-other').textContent = t('forOther');
+    $('set-size').options[0].text = t('standard'); $('set-size').options[1].text = t('big');
   }
   function status(msg) { $('sync-status').textContent = msg || ''; }
   const fmtDate = (d, opts = { weekday: 'long', month: 'long', day: 'numeric' }) =>
@@ -513,12 +564,18 @@
     day.tasks.forEach(task => {
       const li = document.createElement('li');
       li.className = task.done ? 'done' : '';
-      li.innerHTML = '<label><input type="checkbox"><span></span></label><button class="repeat"></button><button aria-label="Delete">×</button>';
-      li.querySelector('span').textContent = task.text; // textContent, so typed text can't inject HTML
-      if (task.time) { const w = document.createElement('span'); w.className = 'when'; w.textContent = '⏰ ' + task.time; li.querySelector('span').prepend(w); }
+      li.innerHTML = '<span class="handle">⠿</span><label><input type="checkbox"><span></span></label><button class="repeat"></button><button aria-label="Delete">×</button>';
+      const label = li.querySelector('label span');
+      label.textContent = task.text; // textContent, so typed text can't inject HTML
+      if (task.time) { const w = document.createElement('span'); w.className = 'when'; w.textContent = '⏰ ' + task.time; label.prepend(w); }
+      if (task.by) { const b = document.createElement('span'); b.className = 'by'; b.textContent = t('addedBy')(task.by); label.append(b); }
+      const handle = li.querySelector('.handle');
+      handle.title = t('drag'); handle.setAttribute('aria-label', t('drag'));
+      handle.onpointerdown = e => startDrag(e, li, day);
+      li.task = task;
       const box = li.querySelector('input');
       box.checked = task.done;
-      box.onchange = () => { task.done = box.checked; change(); };
+      box.onchange = () => { task.done = box.checked; if (task.done && task.plan !== undefined) clearNotification('plan-' + task.plan); change(); };
       const rep = li.querySelector('.repeat');
       rep.textContent = '🔁'; rep.setAttribute('aria-pressed', task.repeat); rep.setAttribute('aria-label', t('repeat')); rep.title = t('repeat');
       rep.onclick = () => { task.repeat = !task.repeat; change(); };
@@ -536,32 +593,66 @@
     renderNotes(day);
   }
 
+  // ---------- drag to reorder ----------
+  // Hold ⠿ and move: the task swaps places with the one under your finger; the new order is saved on release.
+  // (Listens on the whole window: moving the row in the page would otherwise lose track of the finger.)
+  function startDrag(e, li, day) {
+    e.preventDefault();
+    const id = e.pointerId;
+    li.classList.add('dragging'); document.body.classList.add('dragging-list');
+    const move = ev => {
+      if (ev.pointerId !== id) return;
+      const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('#list > li');
+      if (!under || under === li) return;
+      const items = [...$('list').children];
+      $('list').insertBefore(li, items.indexOf(under) > items.indexOf(li) ? under.nextSibling : under);
+      if (navigator.vibrate) navigator.vibrate(5);
+    };
+    const end = ev => {
+      if (ev.pointerId !== id) return;
+      removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+      li.classList.remove('dragging'); document.body.classList.remove('dragging-list');
+      const order = [...$('list').children].map(x => x.task);
+      if (order.some((x, i) => x !== day.tasks[i])) { day.tasks = order; change(); }
+    };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', end);
+    addEventListener('pointercancel', end);
+  }
+
+  // Ticking a task off also removes its reminder from the lock screen.
+  async function clearNotification(tag) {
+    try { for (const n of await (await navigator.serviceWorker?.getRegistration())?.getNotifications({ tag }) || []) n.close(); } catch {}
+  }
+
   // ---------- "For later" tasks ----------
   // They wait on the server (Upcoming); the server sends the reminder at their time. When their day comes,
   // the app moves them into that day's list, with their time, and tells the server they're there.
   let addLater = false;
   function savePlans(list) { plans = list; localStorage.setItem('plans', JSON.stringify(plans)); }
   function movePlans() { // returns true if today's list changed
-    const d = today(), due = plans.filter(p => p.date <= d);
+    const d = today(), due = plans.filter(p => !p.to && p.date <= d); // p.to: one I added for someone else
     if (!due.length || !days) return false;
     const day = todayDay();
     for (const p of due)
-      if (!day.tasks.some(x => x.plan === p.id || x.text === p.text)) day.tasks.push({ text: p.text, done: false, repeat: false, time: p.time, plan: p.id });
-    day.tasks.sort((a, b) => (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0); // timed ones in order, after untimed (stable)
-    savePlans(plans.filter(p => p.date > d));
+      if (!day.tasks.some(x => x.plan === p.id))
+        day.tasks.push({ text: p.text, done: false, repeat: false, time: p.time, plan: p.id, ...(p.by && { by: p.by }) });
+    savePlans(plans.filter(p => !due.includes(p)));
     markDirty(d);
     api('/plans/added', 'POST', { ids: due.map(p => p.id) }).catch(() => {});
     return true;
   }
   function renderUpcoming() {
-    const ul = $('upcoming'), list = plans.filter(p => p.date > today());
+    const ul = $('upcoming'), list = plans.filter(p => p.to ? p.date >= today() : p.date > today());
     $('upcoming-box').hidden = !list.length;
     ul.textContent = '';
     for (const p of list) {
       const li = document.createElement('li');
-      li.innerHTML = '<span class="what"></span><span class="muted"></span><button aria-label="Delete">×</button>';
-      li.children[0].textContent = p.text;
-      li.children[1].textContent = fmtDate(p.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' + p.time;
+      li.innerHTML = '<div class="what"><span></span><span class="muted"></span></div><button aria-label="Delete">×</button>';
+      const [what, when] = li.firstChild.children;
+      // "— Sent to mum": I added it for mum.  "— Added by mum": mum added it for me.
+      what.textContent = p.text + (p.to ? ' — ' + t('forName')(p.to) : p.by ? ' — ' + t('addedBy')(p.by) : '');
+      when.textContent = fmtDate(p.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' + p.time;
       armedButton(li.querySelector('button'), t('del'), async () => {
         try { savePlans(await api('/plans', 'DELETE', { id: p.id })); } catch { status(navigator.onLine ? t('syncProblem') : t('offline')); }
         renderToday();
@@ -592,6 +683,43 @@
     $('name').value = '';
   };
   $('add-repeat').onclick = () => { addRepeat = !addRepeat; renderToday(); };
+  // ---------- For someone else ----------
+  let assignTo = null;
+  $('for-other').onclick = async () => {
+    assignTo = null;
+    $('assign-msg').textContent = ''; $('assign-text').value = $('name').value.trim();
+    $('assign-date').value = today(); $('assign-date').min = today();
+    const next = new Date(Date.now() + 3600e3); $('assign-time').value = String(next.getHours()).padStart(2, '0') + ':00';
+    const box = $('assign-people'); box.textContent = t('syncing');
+    $('assign').hidden = false;
+    try { people = await api('/people'); } catch { box.textContent = navigator.onLine ? t('syncProblem') : t('offline'); return; }
+    box.textContent = '';
+    for (const p of people.filter(p => p.id !== me.id)) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = p.name; b.setAttribute('aria-pressed', 'false');
+      b.onclick = () => { assignTo = p; box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); };
+      box.appendChild(b);
+    }
+  };
+  $('assign-cancel').onclick = () => { $('assign').hidden = true; };
+  $('assign-form').onsubmit = async e => {
+    e.preventDefault();
+    const text = $('assign-text').value.trim(), date = $('assign-date').value, time = $('assign-time').value, msg = $('assign-msg');
+    if (!assignTo) return msg.textContent = t('pickPerson');
+    if (!text) return msg.textContent = t('needText');
+    if (!date || !time) return msg.textContent = t('needWhen');
+    if (date < today() || (date === today() && time <= new Date().toTimeString().slice(0, 5))) return msg.textContent = t('pastWhen');
+    try {
+      savePlans(await api('/plans', 'POST', { text, date, time, for: assignTo.id }));
+      $('assign').hidden = true;
+      if ($('name').value.trim() === text) $('name').value = '';
+      status(t('assignSent')(assignTo.name));
+      renderToday();
+    } catch (err) {
+      msg.textContent = err.message === 'storage-full' ? t('storageFull') : err.message === 'too-many-plans' ? t('tooMany') : navigator.onLine ? t('syncProblem') : t('offline');
+    }
+  };
+
   async function addPlan() {
     const text = $('name').value.trim(), date = $('later-date').value, time = $('later-time').value;
     if (!text) return;
@@ -671,6 +799,7 @@
       serverEmpty = !Object.keys(days).length;
       popupShown = r.popupShown;
       savePlans(r.plans || []);
+      applyTextSize(me.settings.textSize || 'standard');
       localStorage.setItem('me', JSON.stringify(me));
       localStorage.setItem('days', JSON.stringify(days));
       localStorage.setItem('popupShown', JSON.stringify(popupShown));
@@ -680,7 +809,7 @@
       const screen = current();
       if (screen === 'pick' || screen === 'pin' || !screen) show('today');
       movePlans();
-      if (current() === 'today' && editingNote < 0 && document.activeElement?.id !== 'note-text') renderToday(); else todayDay();
+      if (current() === 'today' && editingNote < 0 && document.activeElement?.id !== 'note-text' && !document.body.classList.contains('dragging-list')) renderToday(); else todayDay();
       maybePopup();
       status(t('synced'));
     } catch (e) { if (e.message !== 'signed-out') status(t('syncProblem')); }
@@ -806,7 +935,7 @@
       const li = document.createElement('li');
       li.innerHTML = '<span></span><span style="flex:1"></span><span class="muted" style="font-size:14px"></span>';
       li.children[0].textContent = x.done ? '✅' : '❌';
-      li.children[1].textContent = (x.time ? '⏰ ' + x.time + ' ' : '') + x.text + (x.repeat ? ' 🔁' : '');
+      li.children[1].textContent = (x.time ? '⏰ ' + x.time + ' ' : '') + x.text + (x.repeat ? ' 🔁' : '') + (x.by ? ' · ' + t('addedBy')(x.by) : '');
       li.children[2].textContent = x.done ? t('finished') : t('notFinished');
       ul.appendChild(li);
     }
@@ -827,6 +956,7 @@
     const s = me.settings;
     $('settings-who').textContent = t('signedInAs')(me.name);
     $('set-lang').value = s.lang;
+    $('set-size').value = s.textSize || 'standard';
     $('w-on').checked = s.water.on; $('w-every').value = s.water.every; $('w-from').value = s.water.from; $('w-to').value = s.water.to;
     [...$('w-every').options].forEach(o => o.text = `${o.value} ${t('minutes')}`);
     $('m-on').checked = s.morning.on; $('m-time').value = s.morning.time;
@@ -843,6 +973,12 @@
     } catch { $('settings-msg').textContent = navigator.onLine ? t('syncProblem') : t('offline'); }
   }
   $('close-settings').onclick = () => { renderToday(); show('today'); };
+  // Text size is saved with the person (so it follows them to another phone) and on this phone (so it applies before sign-in).
+  function applyTextSize(size) {
+    document.documentElement.classList.toggle('big', size === 'big');
+    try { localStorage.setItem('textSize', size); } catch {}
+  }
+  $('set-size').onchange = async () => { applyTextSize($('set-size').value); await saveSettings({ textSize: $('set-size').value }); renderSettings(); };
   $('set-lang').onchange = async () => { await saveSettings({ lang: $('set-lang').value }); lang = me.settings.lang; translate(); renderSettings(); };
   const saveWater = async () => {
     const from = +$('w-from').value, to = +$('w-to').value;
@@ -923,18 +1059,19 @@
     } catch (err) { $('admin-msg').textContent = err.message === 'name-taken' ? t('nameTaken') : t('syncProblem'); }
   };
 
-  // ---------- refresh: every 20 s, on return, and pull-to-refresh ----------
+  // ---------- refresh: every 60 s while open, every time the app is reopened, and pull-to-refresh ----------
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { pull(); checkAppUpdate(); }
     else if (pushTimer) push();
   });
   window.addEventListener('online', pull);
-  setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 20000);
+  setInterval(() => { if (token && document.visibilityState === 'visible' && !pushTimer) pull(); }, 60000);
 
   // Touch: swipe right from the left edge opens The Bar, swipe left closes it; pull down from the top refreshes.
   const ptr = $('ptr'), spin = ptr.firstElementChild;
   let touch = null;
   addEventListener('touchstart', e => {
+    if (e.target.closest?.('.handle, #assign') || !$('assign').hidden) { touch = null; return; }
     const p = e.touches[0];
     touch = { x: p.clientX, y: p.clientY, dx: 0, dy: 0, mode: null, top: scrollY <= 0 };
     ptr.style.transition = 'none';
@@ -967,7 +1104,9 @@
   });
 
   // ---------- start ----------
+  try { applyTextSize(localStorage.getItem('textSize') === 'big' ? 'big' : 'standard'); } catch {}
   translate();
+  navigator.serviceWorker?.getRegistration().then(r => r?.update()).catch(() => {}); // pick up a new sw.js (notification grouping)
   if (token && me && days) { show('today'); renderToday(); maybePopup(); pull(); }
   else if (token) pull();
   else showPick();

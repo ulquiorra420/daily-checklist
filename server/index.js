@@ -17,13 +17,13 @@ const TEXT = {
         helpNewTitle: name => `📩 Help message from ${name}`, helpSolvedTitle: '✅ Your request was solved',
         helpSolvedBody: 'Please pull down to refresh the app so the changes take effect.',
         planBody: (time, date) => date ? `Was planned for ${date}, ${time}` : `Planned for ${time}`,
-        planAgainBody: time => `Planned for ${time}. If you have finished this task, tick it in the app to stop receiving these notifications.` },
+        addedBy: name => `Added by ${name}`, stopHint: 'If you have finished this task, tick it in the app to stop receiving these notifications.' },
   vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.',
         morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}`,
         helpNewTitle: name => `📩 Tin nhắn trợ giúp từ ${name}`, helpSolvedTitle: '✅ Yêu cầu của bạn đã được giải quyết',
         helpSolvedBody: 'Hãy kéo xuống để làm mới ứng dụng và nhận thay đổi.',
         planBody: (time, date) => date ? `Đã hẹn ngày ${date}, ${time}` : `Hẹn lúc ${time}`,
-        planAgainBody: time => `Hẹn lúc ${time}. Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.` },
+        addedBy: name => `Thêm bởi ${name}`, stopHint: 'Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.' },
 };
 
 export const defaultSettings = lang => ({
@@ -36,7 +36,7 @@ export const defaultSettings = lang => ({
 export const starterData = () => ({});
 
 // people.data = { popupShown?: date }; each day is its own row in the days table:
-// Day = { tasks: [{ text, done, repeat, time?, plan? }], notes: [text], carried?: [text], from?: date, legacy?: true }
+// Day = { tasks: [{ text, done, repeat, time?, plan?, by? }], notes: [text], carried?: [text], from?: date, legacy?: true }
 // The app creates each new day the same way (keep in sync with newDay() in index.html).
 export function newDay(days, date) {
   const prevKey = Object.keys(days).filter(d => d < date).sort().pop();
@@ -121,18 +121,25 @@ async function route(req, env) {
 
   // "For later" tasks: wait here until their day, then the app moves them into that day's list.
   // The reminder at their time is sent by the cron job (sendReminders), even if the app is never opened.
+  // "For someone else": the same, but put on another person's list (person_id = them, by_id = whoever added it).
   if (m === 'GET' && p === '/plans') return waitingPlans(db, me.id);
   if (m === 'POST' && p === '/plans') {
     const text = String(body.text || '').trim(), { date, time } = body;
     if (!text || text.length > 200 || !isDate(date) || !isTime(time)) throw new HttpError(400, 'bad-plan');
-    const { n } = await db.prepare('SELECT COUNT(*) AS n FROM plans WHERE person_id = ? AND added = 0').bind(me.id).first();
+    let target = me.id;
+    if (body.for && body.for !== me.id) {
+      const them = await db.prepare('SELECT id FROM people WHERE id = ?').bind(String(body.for)).first();
+      if (!them) throw new HttpError(404, 'no-person');
+      target = them.id;
+    }
+    const { n } = await db.prepare('SELECT COUNT(*) AS n FROM plans WHERE person_id = ? AND added = 0').bind(target).first();
     if (n >= MAX_PLANS) throw new HttpError(400, 'too-many-plans');
-    if (await usage(db, me.id) + bytes(text) > USAGE_LIMIT) throw new HttpError(413, 'storage-full');
-    await db.prepare('INSERT INTO plans (person_id, text, date, time, created) VALUES (?, ?, ?, ?, ?)').bind(me.id, text, date, time, Date.now()).run();
+    if (await usage(db, target) + bytes(text) > USAGE_LIMIT) throw new HttpError(413, 'storage-full');
+    await db.prepare('INSERT INTO plans (person_id, by_id, text, date, time, created) VALUES (?, ?, ?, ?, ?, ?)').bind(target, me.id, text, date, time, Date.now()).run();
     return waitingPlans(db, me.id);
   }
-  if (m === 'DELETE' && p === '/plans') {
-    await db.prepare('DELETE FROM plans WHERE id = ? AND person_id = ?').bind(Number(body.id), me.id).run();
+  if (m === 'DELETE' && p === '/plans') { // their own, or one they added for someone else
+    await db.prepare('DELETE FROM plans WHERE id = ? AND (person_id = ?2 OR by_id = ?2)').bind(Number(body.id), me.id).run();
     return waitingPlans(db, me.id);
   }
   if (m === 'POST' && p === '/plans/added') { // the app has put these into today's list
@@ -266,9 +273,18 @@ async function recentDays(db, personId) {
   const { results } = await db.prepare('SELECT date, day FROM days WHERE person_id = ? ORDER BY date DESC LIMIT 2').bind(personId).all();
   return Object.fromEntries(results.map(r => [r.date, JSON.parse(r.day)]));
 }
+// Plans waiting for their day: this person's own ({ by: name } if someone else added it), and ones
+// they added for someone else ({ to: name }; shown in their Upcoming so they can cancel, never in their list).
 async function waitingPlans(db, personId) {
-  const { results } = await db.prepare('SELECT id, text, date, time FROM plans WHERE person_id = ? AND added = 0 ORDER BY date, time, id').bind(personId).all();
-  return results;
+  const { results } = await db.prepare(`
+    SELECT pl.id AS id, pl.text AS text, pl.date AS date, pl.time AS time, b.name AS by_name, NULL AS to_name FROM plans pl
+      LEFT JOIN people b ON b.id = pl.by_id AND pl.by_id != pl.person_id
+      WHERE pl.person_id = ?1 AND pl.added = 0
+    UNION ALL
+    SELECT pl.id, pl.text, pl.date, pl.time, NULL, r.name FROM plans pl JOIN people r ON r.id = pl.person_id
+      WHERE pl.by_id = ?1 AND pl.person_id != ?1 AND pl.added = 0
+    ORDER BY date, time, id`).bind(personId).all();
+  return results.map(({ by_name, to_name, ...p }) => ({ ...p, ...(by_name && { by: by_name }), ...(to_name && { to: to_name }) }));
 }
 async function notify(env, personId, msg) {
   const { results: subs } = await env.DB.prepare('SELECT endpoint, sub FROM subs WHERE person_id = ?').bind(personId).all();
@@ -289,10 +305,11 @@ export function cleanDay(d) {
   const texts = (a, max, len) => Array.isArray(a) && a.length <= max && a.every(x => typeof x === 'string' && x.length <= len);
   if (!d || !Array.isArray(d.tasks) || d.tasks.length > 200
       || !d.tasks.every(t => t && typeof t.text === 'string' && t.text.length <= 200 && typeof t.done === 'boolean' && typeof t.repeat === 'boolean'
-        && (t.time === undefined || isTime(t.time)) && (t.plan === undefined || Number.isInteger(t.plan)))
+        && (t.time === undefined || isTime(t.time)) && (t.plan === undefined || Number.isInteger(t.plan))
+        && (t.by === undefined || (typeof t.by === 'string' && t.by.length <= 30)))
       || !texts(d.notes, 100, 5000) || (d.carried !== undefined && !texts(d.carried, 200, 200)) || (d.from !== undefined && !isDate(d.from)))
     throw new HttpError(400, 'bad-data');
-  const out = { tasks: d.tasks.map(t => ({ text: t.text, done: t.done, repeat: t.repeat, ...(t.time && { time: t.time }), ...(t.plan !== undefined && { plan: t.plan }) })), notes: d.notes };
+  const out = { tasks: d.tasks.map(t => ({ text: t.text, done: t.done, repeat: t.repeat, ...(t.time && { time: t.time }), ...(t.plan !== undefined && { plan: t.plan }), ...(t.by && { by: t.by }) })), notes: d.notes };
   if (d.carried) out.carried = d.carried;
   if (d.from) out.from = d.from;
   if (d.legacy === true) out.legacy = true;
@@ -312,6 +329,7 @@ export function fromOldFormat(old, today) {
 export function cleanSettings(s, old) {
   const out = structuredClone(old);
   if (s.lang === 'en' || s.lang === 'vi') out.lang = s.lang;
+  if (s.textSize === 'big' || s.textSize === 'standard') out.textSize = s.textSize;
   if (typeof s.tz === 'string') { try { new Intl.DateTimeFormat('en', { timeZone: s.tz }); out.tz = s.tz; } catch {} }
   const hour = h => Number.isInteger(h) && h >= 0 && h <= 23;
   if (s.water) {
@@ -346,7 +364,7 @@ export function dueReminders(person, now) {
     const key = `${date} ${hhmm(slot)}`;
     if (minutes - slot < Math.min(15, w.every) && person.last_water !== key) {
       out.waterSlot = key;
-      out.messages.push({ title: t.waterTitle, body: t.waterBody, tag: 'water', ttl: w.every * 60 });
+      out.messages.push({ title: t.waterTitle, body: t.waterBody, tag: 'water', ttl: w.every * 60 }); // same tag: replaces the last one on the phone
     }
   }
   // 15-minute window so a skipped cron run doesn't lose the day's reminder; last_* columns stop repeats.
@@ -375,9 +393,9 @@ export function dueReminders(person, now) {
     const task = today.tasks.find(x => x.plan === p.id);
     if (offset === 0 && p.added && (!task || task.done)) continue; // ticked off, or deleted from the list
     out.planSlots.push({ id: p.id, slot });
-    const first = slot === at;
-    out.messages.push({ title: '⏰ ' + p.text, body: first ? t.planBody(p.time, offset ? p.date : null) : t.planAgainBody(p.time),
-      tag: 'plan', ttl: PLAN_REPEAT * 60 });
+    const body = [t.planBody(p.time, offset ? p.date : null), p.by_name && t.addedBy(p.by_name)].filter(Boolean).join(' · ');
+    out.messages.push({ title: '⏰ ' + p.text, body: slot === at ? body : body + '. ' + t.stopHint,
+      tag: 'plan-' + p.id, ttl: PLAN_REPEAT * 60 }); // one tag per task: each repeat replaces the one before
   }
   return out;
 }
@@ -386,7 +404,8 @@ export function dueReminders(person, now) {
 async function sendReminders(env, now) {
   const db = env.DB;
   const { results: people } = await db.prepare('SELECT id, settings, last_summary, last_morning, last_water FROM people').all();
-  const { results: plans } = await db.prepare('SELECT id, person_id, text, date, time, added, last_slot FROM plans WHERE sent = 0').all();
+  const { results: plans } = await db.prepare(`SELECT pl.id, pl.person_id, pl.text, pl.date, pl.time, pl.added, pl.last_slot,
+      CASE WHEN pl.by_id != pl.person_id THEN b.name END AS by_name FROM plans pl LEFT JOIN people b ON b.id = pl.by_id WHERE pl.sent = 0`).all();
   for (const person of people) {
     try {
       person.data = JSON.stringify({ days: await recentDays(db, person.id) }); // today + the day before is all reminders need
