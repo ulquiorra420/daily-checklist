@@ -91,24 +91,48 @@ assert.deepStrictEqual(tags(dueReminders(vn, at('2026-11-24T01:59:00Z'))), []); 
   assert.strictEqual(sent.length, 29); assert.strictEqual(sent[0], '09:00'); assert.strictEqual(sent.at(-1), '23:00');
 }
 
-// ---- "For later" tasks ----
-const plan = (id, date, time, extra = {}) => ({ id, text: 'Dentist', date, time, added: 0, ...extra });
+// ---- "For later" tasks: at their time, then every 15 min until ticked off, only until 23:59 of that day ----
+const plan = (id, date, time, extra = {}) => ({ id, text: 'Dentist', date, time, added: 0, last_slot: null, ...extra });
 const withPlans = (plans, data = vnData) => ({ ...person('en', 'Asia/Ho_Chi_Minh', data, { water: { on: false, every: 30, from: 9, to: 23 } }), plans });
-assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00')]), at('2026-11-24T07:59:00Z')).plansSent, []); // 14:59
-const pl = dueReminders(withPlans([plan(1, '2026-11-24', '15:00'), plan(2, '2026-11-25', '15:00')]), at('2026-11-24T08:00:00Z')); // 15:00
-assert.deepStrictEqual(pl.plansSent, [1]);
+const vnAt = hm => new Date(`2026-11-24T${hm}:00+07:00`), vnNext = hm => new Date(`2026-11-25T${hm}:00+07:00`);
+assert.deepStrictEqual(tags(dueReminders(withPlans([plan(1, '2026-11-24', '15:00')]), vnAt('14:59'))), []);
+const pl = dueReminders(withPlans([plan(1, '2026-11-24', '15:00'), plan(2, '2026-11-25', '15:00')]), vnAt('15:00'));
+assert.deepStrictEqual(pl.planSlots, [{ id: 1, slot: 900 }]); assert.deepStrictEqual(pl.plansSent, []);
 assert.strictEqual(msg(pl, 'plan').title, '⏰ Dentist'); assert.strictEqual(msg(pl, 'plan').body, 'Planned for 15:00');
-assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00')]), at('2026-11-24T08:07:00Z')).plansSent, [1]); // late run still sends
-assert.strictEqual(msg(dueReminders(withPlans([plan(1, '2026-11-23', '23:59')]), at('2026-11-24T02:00:00Z')), 'plan').body, 'Was planned for 2026-11-23, 23:59');
-// already in today's list: ticked off or deleted -> no reminder; still unticked -> reminder
+assert.strictEqual(msg(pl, 'plan').ttl, 15 * 60);
+assert.deepStrictEqual(tags(dueReminders(withPlans([plan(1, '2026-11-24', '15:00', { last_slot: 900 })]), vnAt('15:07'))), []);   // not twice
+const again = dueReminders(withPlans([plan(1, '2026-11-24', '15:00', { last_slot: 900 })]), vnAt('15:15'));                      // 15 min later
+assert.deepStrictEqual(again.planSlots, [{ id: 1, slot: 915 }]); assert.strictEqual(msg(again, 'plan').body, 'Planned for 15:00. If you have finished this task, tick it in the app to stop receiving these notifications.');
+assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00', { last_slot: 900 })]), vnAt('15:33')).planSlots, [{ id: 1, slot: 930 }]); // late cron catches up
+// a whole afternoon, cron missing some minutes: 15:00, 15:15 ... 23:45 = 36 reminders, then finished at midnight, nothing the next day
+{
+  let p = plan(1, '2026-11-24', '15:00'), times = [], finished = null;
+  for (let m = 14 * 60; m < 26 * 60; m++) {
+    if (m % 15 === 0 && m % 60 === 30) continue; // skipped runs exactly on some reminder times
+    const r = dueReminders(withPlans([p]), new Date(Date.parse('2026-11-24T00:00:00+07:00') + m * 60e3));
+    for (const s of r.planSlots) { times.push(s.slot); p = { ...p, last_slot: s.slot }; }
+    if (r.plansSent.length && finished === null) finished = m;
+    if (r.plansSent.length) break;
+  }
+  assert.strictEqual(times.length, 36); assert.strictEqual(times[0], 900); assert.strictEqual(times.at(-1), 23 * 60 + 45);
+  assert.strictEqual(finished, 24 * 60); // midnight: marked finished, no rollover
+}
+assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00', { last_slot: 1425 })]), vnNext('09:00')).plansSent, [1]); // next morning: just finished, no message
+assert.deepStrictEqual(tags(dueReminders(withPlans([plan(1, '2026-11-24', '15:00', { last_slot: 1425 })]), vnNext('09:00'))), []);
+// 23:59 plan whose cron ran just after midnight still gets its one reminder
+const late = dueReminders(withPlans([plan(1, '2026-11-24', '23:59')]), vnNext('00:02'));
+assert.deepStrictEqual(late.planSlots, [{ id: 1, slot: 1439 }]); assert.strictEqual(msg(late, 'plan').body, 'Was planned for 2026-11-24, 23:59');
+// in the list: ticked off or deleted -> no more reminders (but not finished: unticking brings them back the same day)
 const day24 = tasks => ({ days: { '2026-11-24': { tasks, notes: [] } } });
-const added = plan(1, '2026-11-24', '15:00', { added: 1 });
-assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([{ ...T('Dentist', true), time: '15:00', plan: 1 }])), at('2026-11-24T08:00:00Z'))), []);
-assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([])), at('2026-11-24T08:00:00Z'))), []);
-const still = dueReminders(withPlans([added], day24([{ ...T('Dentist'), time: '15:00', plan: 1 }])), at('2026-11-24T08:00:00Z'));
-assert.deepStrictEqual(tags(still), ['plan']); assert.deepStrictEqual(still.plansSent, [1]);
+const added = plan(1, '2026-11-24', '15:00', { added: 1, last_slot: 900 });
+const ticked = dueReminders(withPlans([added], day24([{ ...T('Dentist', true), time: '15:00', plan: 1 }])), vnAt('15:15'));
+assert.deepStrictEqual(tags(ticked), []); assert.deepStrictEqual(ticked.plansSent, []);
+assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([])), vnAt('15:15'))), []);
+assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([{ ...T('Dentist'), time: '15:00', plan: 1 }])), vnAt('15:15'))), ['plan']);
 // Vietnamese
-assert.strictEqual(msg(dueReminders({ ...withPlans([plan(1, '2026-11-24', '15:00')]), settings: JSON.stringify({ ...defaultSettings('vi'), water: { on: false, every: 30, from: 9, to: 23 } }) }, at('2026-11-24T08:00:00Z')), 'plan').body, 'Hẹn lúc 15:00');
+const viP = p => ({ ...withPlans([p]), settings: JSON.stringify({ ...defaultSettings('vi'), water: { on: false, every: 30, from: 9, to: 23 } }) });
+assert.strictEqual(msg(dueReminders(viP(plan(1, '2026-11-24', '15:00')), vnAt('15:00')), 'plan').body, 'Hẹn lúc 15:00');
+assert.strictEqual(msg(dueReminders(viP(plan(1, '2026-11-24', '15:00', { last_slot: 900 })), vnAt('15:15')), 'plan').body, 'Hẹn lúc 15:00. Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.');
 // timed tasks keep their time and plan id; a bad time is refused
 assert.deepStrictEqual(cleanDay({ tasks: [{ ...T('a'), time: '15:00', plan: 3 }], notes: [] }).tasks, [{ ...T('a'), time: '15:00', plan: 3 }]);
 assert.throws(() => cleanDay({ tasks: [{ ...T('a'), time: '3pm' }], notes: [] }));

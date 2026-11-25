@@ -5,8 +5,10 @@ const ALLOWED_ORIGINS = ['https://ulquiorra420.github.io', 'http://localhost:876
 const LOCK_AFTER = 5, LOCK_MS = 15 * 60 * 1000;
 const EVERY_OPTIONS = [15, 30, 45, 60, 90, 120];
 const MAX_PLANS = 200; // "For later" tasks waiting for their day, per person
+const PLAN_REPEAT = 15;  // minutes between reminders for a "For later" task that isn't ticked off yet (until midnight of its day)
 const isDate = x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x);
 const isTime = x => typeof x === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(x);
+const toMinutes = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
 const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
 
 const TEXT = {
@@ -14,12 +16,14 @@ const TEXT = {
         morningTitle: '⏩ Moved to today', morningBody: (from, yesterday, list) => `Not finished ${from === yesterday ? 'yesterday' : 'on ' + from}: ${list}`,
         helpNewTitle: name => `📩 Help message from ${name}`, helpSolvedTitle: '✅ Your request was solved',
         helpSolvedBody: 'Please pull down to refresh the app so the changes take effect.',
-        planBody: (time, date) => date ? `Was planned for ${date}, ${time}` : `Planned for ${time}` },
+        planBody: (time, date) => date ? `Was planned for ${date}, ${time}` : `Planned for ${time}`,
+        planAgainBody: time => `Planned for ${time}. If you have finished this task, tick it in the app to stop receiving these notifications.` },
   vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.',
         morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}`,
         helpNewTitle: name => `📩 Tin nhắn trợ giúp từ ${name}`, helpSolvedTitle: '✅ Yêu cầu của bạn đã được giải quyết',
         helpSolvedBody: 'Hãy kéo xuống để làm mới ứng dụng và nhận thay đổi.',
-        planBody: (time, date) => date ? `Đã hẹn ngày ${date}, ${time}` : `Hẹn lúc ${time}` },
+        planBody: (time, date) => date ? `Đã hẹn ngày ${date}, ${time}` : `Hẹn lúc ${time}`,
+        planAgainBody: time => `Hẹn lúc ${time}. Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.` },
 };
 
 export const defaultSettings = lang => ({
@@ -333,7 +337,7 @@ export function localNow(date, tz) {
 export function dueReminders(person, now) {
   const s = JSON.parse(person.settings), d = JSON.parse(person.data), t = TEXT[s.lang];
   const { date, minutes } = localNow(now, s.tz);
-  const out = { messages: [], summaryDate: null, morningDate: null, waterSlot: null, plansSent: [] };
+  const out = { messages: [], summaryDate: null, morningDate: null, waterSlot: null, plansSent: [], planSlots: [] };
   // Water: work out the latest reminder time (e.g. 09:30) and send it if it hasn't been sent yet.
   // A late or skipped cron run (Cloudflare sometimes misses a minute) then catches up instead of losing it.
   const w = s.water, start = w.from * 60, end = w.to * 60;
@@ -357,14 +361,23 @@ export function dueReminders(person, now) {
     const left = today.tasks.filter(x => !x.done).map(x => x.text);
     if (left.length) out.messages.push({ title: t.summaryTitle, body: left.join(', '), tag: 'summary' });
   }
-  // "For later" tasks whose time has come (sent late rather than never, if a cron run was missed).
-  const nowKey = `${date} ${hhmm(minutes)}`;
+  // "For later" tasks: a reminder at their time, then again every 15 minutes until ticked off, but only
+  // until 23:59 of that same day (it never rolls over). Like water, a late cron run catches up on the latest one.
   for (const p of person.plans || []) {
-    if (`${p.date} ${p.time}` > nowKey) continue;
-    out.plansSent.push(p.id);
+    const offset = Math.round((Date.parse(date) - Date.parse(p.date)) / 864e5); // 0 = its day, 1 = the day after
+    if (offset < 0) continue;
+    const at = toMinutes(p.time), now = minutes + offset * 1440;
+    const last = at + Math.floor((1439 - at) / PLAN_REPEAT) * PLAN_REPEAT; // the last reminder of its day
+    if (now >= last + PLAN_REPEAT || offset > 1) { out.plansSent.push(p.id); continue; } // its day is over: finished
+    if (now < at) continue;
+    const slot = at + Math.floor((Math.min(now, last) - at) / PLAN_REPEAT) * PLAN_REPEAT;
+    if (now - slot >= PLAN_REPEAT || p.last_slot === slot) continue;
     const task = today.tasks.find(x => x.plan === p.id);
-    if (p.added && p.date === date && (!task || task.done)) continue; // already ticked off, or deleted from today's list
-    out.messages.push({ title: '⏰ ' + p.text, body: t.planBody(p.time, p.date === date ? null : p.date), tag: 'plan', ttl: 12 * 3600 });
+    if (offset === 0 && p.added && (!task || task.done)) continue; // ticked off, or deleted from the list
+    out.planSlots.push({ id: p.id, slot });
+    const first = slot === at;
+    out.messages.push({ title: '⏰ ' + p.text, body: first ? t.planBody(p.time, offset ? p.date : null) : t.planAgainBody(p.time),
+      tag: 'plan', ttl: PLAN_REPEAT * 60 });
   }
   return out;
 }
@@ -373,12 +386,12 @@ export function dueReminders(person, now) {
 async function sendReminders(env, now) {
   const db = env.DB;
   const { results: people } = await db.prepare('SELECT id, settings, last_summary, last_morning, last_water FROM people').all();
-  const { results: plans } = await db.prepare('SELECT id, person_id, text, date, time, added FROM plans WHERE sent = 0').all();
+  const { results: plans } = await db.prepare('SELECT id, person_id, text, date, time, added, last_slot FROM plans WHERE sent = 0').all();
   for (const person of people) {
     try {
       person.data = JSON.stringify({ days: await recentDays(db, person.id) }); // today + the day before is all reminders need
       person.plans = plans.filter(p => p.person_id === person.id);
-      const { messages, summaryDate, morningDate, waterSlot, plansSent } = dueReminders(person, now);
+      const { messages, summaryDate, morningDate, waterSlot, plansSent, planSlots } = dueReminders(person, now);
       for (const msg of messages) await notify(env, person.id, msg);
       // Recorded after sending: if this run is cut short, the next minute's run sends what was missed.
       const updates = [];
@@ -386,6 +399,7 @@ async function sendReminders(env, now) {
       if (morningDate) updates.push(db.prepare('UPDATE people SET last_morning = ? WHERE id = ?').bind(morningDate, person.id));
       if (waterSlot) updates.push(db.prepare('UPDATE people SET last_water = ? WHERE id = ?').bind(waterSlot, person.id));
       for (const id of plansSent) updates.push(db.prepare('UPDATE plans SET sent = 1 WHERE id = ?').bind(id));
+      for (const { id, slot } of planSlots) updates.push(db.prepare('UPDATE plans SET last_slot = ? WHERE id = ?').bind(slot, id));
       if (updates.length) await db.batch(updates);
     } catch (e) { console.error('reminders failed for', person.id, e); } // one person's problem must not stop everyone else's reminders
   }

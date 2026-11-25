@@ -46,5 +46,6 @@ CREATE TABLE IF NOT EXISTS plans (
   time TEXT NOT NULL,          -- HH:MM
   created INTEGER NOT NULL,
   added INTEGER NOT NULL DEFAULT 0, -- 1 = the app has put it into that day's list
-  sent INTEGER NOT NULL DEFAULT 0   -- 1 = reminder sent
+  sent INTEGER NOT NULL DEFAULT 0,  -- 1 = finished: its day is over, no more reminders
+  last_slot INTEGER                 -- minutes after midnight of the last reminder sent (first one, then every 15 min)
 );

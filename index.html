@@ -277,7 +277,7 @@
   </footer>
 </main>
 <script>
-  const VERSION = 11; // bump on every release so installed copies update themselves
+  const VERSION = 12; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -323,7 +323,7 @@
       helpSent: 'Sent ✓ dannyle will see it.', helpYours: 'Your messages', helpAll: 'Messages from family', helpNone: 'No messages yet.',
       waiting: 'Waiting', solved: '✅ Solved', markSolved: 'Solved',
       forToday: 'For today', forLater: 'For later', upcoming: 'Upcoming',
-      laterHint: '⏰ You will get a notification at this time. On that day it joins your list.',
+      laterHint: '⏰ You will get a notification at this time, then every 15 minutes until you tick it off (until midnight). On that day it joins your list.',
       needWhen: 'Choose a date and a time.', pastWhen: 'That time has already passed.', tooMany: 'Too many planned tasks.',
     },
     vi: {
@@ -357,7 +357,7 @@
       helpSent: 'Đã gửi ✓ dannyle sẽ xem.', helpYours: 'Tin nhắn của bạn', helpAll: 'Tin nhắn từ gia đình', helpNone: 'Chưa có tin nhắn.',
       waiting: 'Đang chờ', solved: '✅ Đã giải quyết', markSolved: 'Đã xong',
       forToday: 'Cho hôm nay', forLater: 'Để sau', upcoming: 'Sắp tới',
-      laterHint: '⏰ Bạn sẽ nhận thông báo vào giờ này. Đến ngày đó, việc sẽ vào danh sách của bạn.',
+      laterHint: '⏰ Bạn sẽ nhận thông báo vào giờ này, rồi cứ 15 phút một lần cho đến khi đánh dấu xong (đến nửa đêm). Đến ngày đó, việc sẽ vào danh sách của bạn.',
       needWhen: 'Hãy chọn ngày và giờ.', pastWhen: 'Giờ này đã qua rồi.', tooMany: 'Có quá nhiều việc đã hẹn.',
     },
   };
