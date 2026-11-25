@@ -24,8 +24,17 @@ export async function encryptPayload(sub, payload, salt = crypto.getRandomValues
   return concat(salt, [0, 0, 16, 0], [asPublic.length], asPublic, cipher); // record size 4096
 }
 
+// The signed header is reused for an hour per push service (Apple, Google, Mozilla), so a cron run with many
+// reminders doesn't re-sign every one (keeps each run fast and well inside Cloudflare's CPU limit).
+const vapidCache = new Map();
 export async function vapidAuth(endpoint, env) {
-  const aud = new URL(endpoint).origin;
+  const aud = new URL(endpoint).origin, hit = vapidCache.get(aud);
+  if (hit && hit.until > Date.now()) return hit.value;
+  const value = await signVapid(aud, env);
+  vapidCache.set(aud, { value, until: Date.now() + 3600e3 });
+  return value;
+}
+async function signVapid(aud, env) {
   const header = b64u(enc.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
   const claims = b64u(enc.encode(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT })));
   const key = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE_JWK), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
@@ -34,10 +43,12 @@ export async function vapidAuth(endpoint, env) {
 }
 
 // Returns the HTTP status from the push service (201 = sent; 404/410 = subscription is gone).
-export async function sendPush(sub, message, env) {
+// message.ttl (seconds): how long the push service keeps trying if the phone is offline; a water reminder
+// is pointless once the next one is due. Urgency 'high' asks phones in power-saving mode to show it right away.
+export async function sendPush(sub, { ttl = 3600, ...message }, env) {
   const body = await encryptPayload(sub, JSON.stringify(message));
   const r = await fetch(sub.endpoint, { method: 'POST', body, headers: {
-    'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '3600', Urgency: 'normal',
+    'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: String(ttl), Urgency: 'high',
     Authorization: await vapidAuth(sub.endpoint, env) } });
   return r.status;
 }

@@ -36,7 +36,7 @@ const m = dueReminders(vn, at('2026-11-24T03:00:00Z'));
 assert.deepStrictEqual(tags(m), ['water', 'morning']);
 assert.strictEqual(msg(m, 'morning').body, 'Hôm qua chưa xong: Tập thể dục');
 assert.strictEqual(m.morningDate, '2026-11-24');
-assert.deepStrictEqual(tags(dueReminders(person('vi', 'Asia/Ho_Chi_Minh', vnData, {}, { last_morning: '2026-11-24' }), at('2026-11-24T03:05:00Z'))), []); // not twice
+assert.deepStrictEqual(tags(dueReminders(person('vi', 'Asia/Ho_Chi_Minh', vnData, {}, { last_morning: '2026-11-24', last_water: '2026-11-24 10:00' }), at('2026-11-24T03:05:00Z'))), []); // not twice
 // nothing unfinished yesterday -> no morning message, but the day is marked handled
 const clean = dueReminders(person('en', 'Asia/Ho_Chi_Minh', { days: { '2026-11-23': { tasks: [T('A', true)], notes: [] } } }), at('2026-11-24T03:00:00Z'));
 assert.ok(!tags(clean).includes('morning')); assert.strictEqual(clean.morningDate, '2026-11-24');
@@ -71,5 +71,48 @@ assert.throws(() => cleanDay({ tasks: [T('a')], notes: 'x' }));
 assert.throws(() => cleanDay({ tasks: [{ text: 'a', done: 'yes', repeat: false }], notes: [] }));
 assert.deepStrictEqual(cleanDay({ tasks: [{ ...T('a'), extra: 1 }], notes: ['n'], carried: ['a'], from: '2026-11-23', junk: 1 }),
   { tasks: [T('a')], notes: ['n'], carried: ['a'], from: '2026-11-23' });
+
+// ---- water: a late or skipped cron run catches up, but never sends the same reminder twice ----
+const w = dueReminders(vn, at('2026-11-24T02:33:00Z'));                     // 09:33, cron missed 09:30..09:32
+assert.deepStrictEqual(tags(w), ['water']); assert.strictEqual(w.waterSlot, '2026-11-24 09:30');
+assert.strictEqual(msg(w, 'water').ttl, 30 * 60);                            // stale after the next one is due
+assert.deepStrictEqual(tags(dueReminders(person('vi', 'Asia/Ho_Chi_Minh', vnData, {}, { last_water: '2026-11-24 09:30' }), at('2026-11-24T02:34:00Z'))), []); // already sent
+assert.deepStrictEqual(tags(dueReminders(person('vi', 'Asia/Ho_Chi_Minh', vnData, {}, { last_water: '2026-11-23 23:00' }), at('2026-11-24T02:00:00Z'))), ['water']); // yesterday's doesn't block today
+assert.deepStrictEqual(tags(dueReminders(vn, at('2026-11-24T16:05:00Z'))), ['water']); // 23:05: the 23:00 one, if it was missed
+assert.deepStrictEqual(tags(dueReminders(vn, at('2026-11-24T01:59:00Z'))), []);         // 08:59: not started yet
+// every slot from 09:00 to 23:00 (29 of them) is sent exactly once, even with a random cron minute missing each hour
+{
+  let p = person('en', 'Asia/Ho_Chi_Minh', vnData), sent = [];
+  for (let m = 8 * 60; m <= 24 * 60 - 1; m++) {
+    if (m % 60 === 17 || m % 60 === 30) continue; // skipped runs, including exactly on :30
+    const r = dueReminders(p, new Date(Date.parse('2026-11-24T00:00:00+07:00') + m * 60e3));
+    if (r.waterSlot) { sent.push(r.waterSlot.slice(11)); p = { ...p, last_water: r.waterSlot }; }
+  }
+  assert.strictEqual(sent.length, 29); assert.strictEqual(sent[0], '09:00'); assert.strictEqual(sent.at(-1), '23:00');
+}
+
+// ---- "For later" tasks ----
+const plan = (id, date, time, extra = {}) => ({ id, text: 'Dentist', date, time, added: 0, ...extra });
+const withPlans = (plans, data = vnData) => ({ ...person('en', 'Asia/Ho_Chi_Minh', data, { water: { on: false, every: 30, from: 9, to: 23 } }), plans });
+assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00')]), at('2026-11-24T07:59:00Z')).plansSent, []); // 14:59
+const pl = dueReminders(withPlans([plan(1, '2026-11-24', '15:00'), plan(2, '2026-11-25', '15:00')]), at('2026-11-24T08:00:00Z')); // 15:00
+assert.deepStrictEqual(pl.plansSent, [1]);
+assert.strictEqual(msg(pl, 'plan').title, '⏰ Dentist'); assert.strictEqual(msg(pl, 'plan').body, 'Planned for 15:00');
+assert.deepStrictEqual(dueReminders(withPlans([plan(1, '2026-11-24', '15:00')]), at('2026-11-24T08:07:00Z')).plansSent, [1]); // late run still sends
+assert.strictEqual(msg(dueReminders(withPlans([plan(1, '2026-11-23', '23:59')]), at('2026-11-24T02:00:00Z')), 'plan').body, 'Was planned for 2026-11-23, 23:59');
+// already in today's list: ticked off or deleted -> no reminder; still unticked -> reminder
+const day24 = tasks => ({ days: { '2026-11-24': { tasks, notes: [] } } });
+const added = plan(1, '2026-11-24', '15:00', { added: 1 });
+assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([{ ...T('Dentist', true), time: '15:00', plan: 1 }])), at('2026-11-24T08:00:00Z'))), []);
+assert.deepStrictEqual(tags(dueReminders(withPlans([added], day24([])), at('2026-11-24T08:00:00Z'))), []);
+const still = dueReminders(withPlans([added], day24([{ ...T('Dentist'), time: '15:00', plan: 1 }])), at('2026-11-24T08:00:00Z'));
+assert.deepStrictEqual(tags(still), ['plan']); assert.deepStrictEqual(still.plansSent, [1]);
+// Vietnamese
+assert.strictEqual(msg(dueReminders({ ...withPlans([plan(1, '2026-11-24', '15:00')]), settings: JSON.stringify({ ...defaultSettings('vi'), water: { on: false, every: 30, from: 9, to: 23 } }) }, at('2026-11-24T08:00:00Z')), 'plan').body, 'Hẹn lúc 15:00');
+// timed tasks keep their time and plan id; a bad time is refused
+assert.deepStrictEqual(cleanDay({ tasks: [{ ...T('a'), time: '15:00', plan: 3 }], notes: [] }).tasks, [{ ...T('a'), time: '15:00', plan: 3 }]);
+assert.throws(() => cleanDay({ tasks: [{ ...T('a'), time: '3pm' }], notes: [] }));
+// the next day the carried task is a plain task again
+assert.deepStrictEqual(newDay({ '2026-11-24': { tasks: [{ ...T('Dentist'), time: '15:00', plan: 1 }], notes: [] } }, '2026-11-25').tasks, [T('Dentist')]);
 
 console.log('reminders + days OK');

@@ -26,9 +26,20 @@
   li button, .icon { background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; padding:4px; }
   .repeat { font-size:16px !important; opacity:.25; }
   .repeat[aria-pressed=true] { opacity:1; }
+  .when { color:var(--accent); font-size:15px; font-variant-numeric:tabular-nums; margin-right:6px; white-space:nowrap; }
+  li.done .when { color:var(--muted); }
+  /* For today / For later */
+  .seg { display:flex; gap:0; margin:0 0 8px; border:1px solid var(--muted); border-radius:10px; overflow:hidden; }
+  .seg button { flex:1; padding:9px; border:0; background:var(--card); color:var(--text); font-size:15px; cursor:pointer; }
+  .seg button[aria-pressed=true] { background:var(--accent); color:#fff; }
+  #later-row { margin-top:8px; }
+  #later-row input { padding:10px; }
+  #upcoming li { gap:10px; }
+  #upcoming .what { flex:1; min-width:0; overflow-wrap:anywhere; }
+  #upcoming .muted { font-size:14px; white-space:nowrap; }
   form { display:flex; gap:8px; }
   input, select, button, textarea { box-sizing:border-box; font-family:inherit; }
-  input[type=text], input[type=password], input[type=time], select, textarea { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
+  input[type=text], input[type=password], input[type=time], input[type=date], select, textarea { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--muted); background:var(--card); color:var(--text); font-size:16px; }
   textarea { width:100%; resize:vertical; }
   button.main { padding:12px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; cursor:pointer; }
   button.toggle { padding:0 12px; border:1px solid var(--muted); border-radius:10px; background:var(--card); font-size:18px; opacity:.4; cursor:pointer; }
@@ -133,12 +144,25 @@
     <p id="date"></p>
     <ul id="list"></ul>
     <p id="progress"></p>
+    <div class="seg" role="group">
+      <button type="button" id="for-today" aria-pressed="true" data-t="forToday"></button>
+      <button type="button" id="for-later" aria-pressed="false" data-t="forLater"></button>
+    </div>
     <form id="add">
-      <input id="name" type="text" required>
+      <input id="name" type="text" required maxlength="200">
       <button type="button" class="toggle" id="add-repeat" aria-pressed="false">🔁</button>
       <button class="main" data-t="add"></button>
     </form>
+    <div class="row" id="later-row" hidden>
+      <input type="date" id="later-date" aria-label="Date">
+      <input type="time" id="later-time" aria-label="Time">
+    </div>
     <p class="muted" id="repeat-hint" style="font-size:14px;margin:6px 0 0"></p>
+
+    <div id="upcoming-box" hidden>
+      <h2 data-t="upcoming"></h2>
+      <ul id="upcoming"></ul>
+    </div>
 
     <h2 data-t="note"></h2>
     <form id="note-form" style="flex-direction:column">
@@ -253,7 +277,7 @@
   </footer>
 </main>
 <script>
-  const VERSION = 10; // bump on every release so installed copies update themselves
+  const VERSION = 11; // bump on every release so installed copies update themselves
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -298,6 +322,9 @@
       help: 'Help', helpPrompt: 'Has any problem occurred, or would you like anything changed in this app?', send: 'Send',
       helpSent: 'Sent ✓ dannyle will see it.', helpYours: 'Your messages', helpAll: 'Messages from family', helpNone: 'No messages yet.',
       waiting: 'Waiting', solved: '✅ Solved', markSolved: 'Solved',
+      forToday: 'For today', forLater: 'For later', upcoming: 'Upcoming',
+      laterHint: '⏰ You will get a notification at this time. On that day it joins your list.',
+      needWhen: 'Choose a date and a time.', pastWhen: 'That time has already passed.', tooMany: 'Too many planned tasks.',
     },
     vi: {
       today: 'Hôm nay', add: 'Thêm', addPlaceholder: 'Thêm việc…', del: 'Xoá?', sure: 'Chắc chưa?',
@@ -329,6 +356,9 @@
       help: 'Trợ giúp', helpPrompt: 'Ứng dụng có gặp vấn đề gì không, hoặc bạn muốn thay đổi điều gì?', send: 'Gửi',
       helpSent: 'Đã gửi ✓ dannyle sẽ xem.', helpYours: 'Tin nhắn của bạn', helpAll: 'Tin nhắn từ gia đình', helpNone: 'Chưa có tin nhắn.',
       waiting: 'Đang chờ', solved: '✅ Đã giải quyết', markSolved: 'Đã xong',
+      forToday: 'Cho hôm nay', forLater: 'Để sau', upcoming: 'Sắp tới',
+      laterHint: '⏰ Bạn sẽ nhận thông báo vào giờ này. Đến ngày đó, việc sẽ vào danh sách của bạn.',
+      needWhen: 'Hãy chọn ngày và giờ.', pastWhen: 'Giờ này đã qua rồi.', tooMany: 'Có quá nhiều việc đã hẹn.',
     },
   };
 
@@ -346,6 +376,7 @@
   let me = load('me', null);              // { id, name, isAdmin, settings }
   let days = load('days', null);          // the two most recent days: { 'YYYY-MM-DD': { tasks, notes, carried?, from? } }
   let popupShown = load('popupShown', null);
+  let plans = load('plans', []);          // "For later" tasks not yet in a day's list: [{ id, text, date, time }]
   let serverEmpty = false;                // brand-new person: no days on the server yet
   let pushTimer = null;
   let lang = me?.settings?.lang || (navigator.language.startsWith('vi') ? 'vi' : 'en');
@@ -435,8 +466,8 @@
   };
 
   function signOut() {
-    token = me = days = popupShown = null;
-    ['session', 'me', 'days', 'dirty', 'popupShown', 'list'].forEach(k => localStorage.removeItem(k));
+    token = me = days = popupShown = null; plans = [];
+    ['session', 'me', 'days', 'dirty', 'popupShown', 'list', 'plans'].forEach(k => localStorage.removeItem(k));
     showPick();
   }
 
@@ -484,6 +515,7 @@
       li.className = task.done ? 'done' : '';
       li.innerHTML = '<label><input type="checkbox"><span></span></label><button class="repeat"></button><button aria-label="Delete">×</button>';
       li.querySelector('span').textContent = task.text; // textContent, so typed text can't inject HTML
+      if (task.time) { const w = document.createElement('span'); w.className = 'when'; w.textContent = '⏰ ' + task.time; li.querySelector('span').prepend(w); }
       const box = li.querySelector('input');
       box.checked = task.done;
       box.onchange = () => { task.done = box.checked; change(); };
@@ -496,9 +528,54 @@
     const n = day.tasks.filter(x => x.done).length;
     $('progress').textContent = day.tasks.length ? t('progress')(n, day.tasks.length) + (n === day.tasks.length ? ' 🎉' : '') : t('noTasks');
     $('add-repeat').setAttribute('aria-pressed', addRepeat);
-    $('repeat-hint').textContent = t(addRepeat ? 'repeatOn' : 'repeatOff');
+    $('for-today').setAttribute('aria-pressed', !addLater); $('for-later').setAttribute('aria-pressed', addLater);
+    $('add-repeat').hidden = addLater; $('later-row').hidden = !addLater;
+    $('later-date').min = today();
+    $('repeat-hint').textContent = addLater ? t('laterHint') : t(addRepeat ? 'repeatOn' : 'repeatOff');
+    renderUpcoming();
     renderNotes(day);
   }
+
+  // ---------- "For later" tasks ----------
+  // They wait on the server (Upcoming); the server sends the reminder at their time. When their day comes,
+  // the app moves them into that day's list, with their time, and tells the server they're there.
+  let addLater = false;
+  function savePlans(list) { plans = list; localStorage.setItem('plans', JSON.stringify(plans)); }
+  function movePlans() { // returns true if today's list changed
+    const d = today(), due = plans.filter(p => p.date <= d);
+    if (!due.length || !days) return false;
+    const day = todayDay();
+    for (const p of due)
+      if (!day.tasks.some(x => x.plan === p.id || x.text === p.text)) day.tasks.push({ text: p.text, done: false, repeat: false, time: p.time, plan: p.id });
+    day.tasks.sort((a, b) => (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0); // timed ones in order, after untimed (stable)
+    savePlans(plans.filter(p => p.date > d));
+    markDirty(d);
+    api('/plans/added', 'POST', { ids: due.map(p => p.id) }).catch(() => {});
+    return true;
+  }
+  function renderUpcoming() {
+    const ul = $('upcoming'), list = plans.filter(p => p.date > today());
+    $('upcoming-box').hidden = !list.length;
+    ul.textContent = '';
+    for (const p of list) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="what"></span><span class="muted"></span><button aria-label="Delete">×</button>';
+      li.children[0].textContent = p.text;
+      li.children[1].textContent = fmtDate(p.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' + p.time;
+      armedButton(li.querySelector('button'), t('del'), async () => {
+        try { savePlans(await api('/plans', 'DELETE', { id: p.id })); } catch { status(navigator.onLine ? t('syncProblem') : t('offline')); }
+        renderToday();
+      });
+      ul.appendChild(li);
+    }
+  }
+  $('for-today').onclick = () => { addLater = false; renderToday(); };
+  $('for-later').onclick = () => {
+    addLater = true;
+    if (!$('later-date').value) $('later-date').value = addDays(today(), 1);
+    if (!$('later-time').value) $('later-time').value = '09:00';
+    renderToday();
+  };
   // Tap once to arm, tap again to act (pop-up confirm() is blocked in some app views).
   function armedButton(btn, armedText, action) {
     btn.onclick = e => {
@@ -507,13 +584,29 @@
       btn.dataset.armed = 1; btn.textContent = armedText; btn.style.color = 'var(--danger)'; btn.style.fontSize = '15px';
     };
   }
-  $('add').onsubmit = e => {
+  $('add').onsubmit = async e => {
     e.preventDefault();
+    if (addLater) return addPlan();
     const text = $('name').value.trim(), day = todayDay();
     if (text && !day.tasks.some(x => x.text === text)) { day.tasks.push({ text, done: false, repeat: addRepeat }); change(); }
     $('name').value = '';
   };
   $('add-repeat').onclick = () => { addRepeat = !addRepeat; renderToday(); };
+  async function addPlan() {
+    const text = $('name').value.trim(), date = $('later-date').value, time = $('later-time').value;
+    if (!text) return;
+    if (!date || !time) return status(t('needWhen'));
+    const now = new Date(), nowTime = now.toTimeString().slice(0, 5);
+    if (date < today() || (date === today() && time <= nowTime)) return status(t('pastWhen'));
+    try {
+      status(t('syncing'));
+      savePlans(await api('/plans', 'POST', { text, date, time }));
+      $('name').value = ''; status(t('synced'));
+      movePlans(); renderToday();
+    } catch (err) {
+      status(err.message === 'storage-full' ? t('storageFull') : err.message === 'too-many-plans' ? t('tooMany') : navigator.onLine ? t('syncProblem') : t('offline'));
+    }
+  }
 
   // Notes: today's notes can be edited or deleted; after midnight they belong to the Archive (read-only).
   let editingNote = -1;
@@ -577,6 +670,7 @@
       days = r.recent;
       serverEmpty = !Object.keys(days).length;
       popupShown = r.popupShown;
+      savePlans(r.plans || []);
       localStorage.setItem('me', JSON.stringify(me));
       localStorage.setItem('days', JSON.stringify(days));
       localStorage.setItem('popupShown', JSON.stringify(popupShown));
@@ -585,6 +679,7 @@
       $('bar-who').textContent = t('signedInAs')(me.name);
       const screen = current();
       if (screen === 'pick' || screen === 'pin' || !screen) show('today');
+      movePlans();
       if (current() === 'today' && editingNote < 0 && document.activeElement?.id !== 'note-text') renderToday(); else todayDay();
       maybePopup();
       status(t('synced'));
@@ -711,7 +806,7 @@
       const li = document.createElement('li');
       li.innerHTML = '<span></span><span style="flex:1"></span><span class="muted" style="font-size:14px"></span>';
       li.children[0].textContent = x.done ? '✅' : '❌';
-      li.children[1].textContent = x.text + (x.repeat ? ' 🔁' : '');
+      li.children[1].textContent = (x.time ? '⏰ ' + x.time + ' ' : '') + x.text + (x.repeat ? ' 🔁' : '');
       li.children[2].textContent = x.done ? t('finished') : t('notFinished');
       ul.appendChild(li);
     }
