@@ -6,8 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Daily Checklist</title>
 <style>
-  :root { --bg:#f6f6f3; --card:#fff; --text:#222; --muted:#888; --accent:#2f7d5b; --danger:#c0392b; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#161616; --card:#222; --text:#eee; --muted:#999; --accent:#5fc595; --danger:#e57366; } }
+  :root { --bg:#f6f6f3; --card:#fff; --text:#222; --muted:#888; --accent:#2f7d5b; --danger:#c0392b; --sheet:#f6f6f3; --dim:rgba(0,0,0,.4); }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161616; --card:#222; --text:#eee; --muted:#999; --accent:#5fc595; --danger:#e57366;
+    --sheet:#323235; --dim:rgba(0,0,0,.65); } } /* --sheet: pop-ups, a lighter grey so they stand out from the page */
   body { margin:0; background:var(--bg); color:var(--text); font:17px/1.4 -apple-system, system-ui, sans-serif; }
   main { max-width:480px; margin:0 auto; padding:24px 16px; }
   h1 { margin:0; font-size:26px; }
@@ -87,8 +88,8 @@
   .day-btn:disabled { opacity:.45; cursor:default; }
   .day-list li { gap:10px; }
   /* Pop-up */
-  #modal, #assign { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
-  #modal .box, #assign .box { background:var(--bg); border-radius:16px; padding:20px; max-width:400px; width:100%; box-sizing:border-box; max-height:100%; overflow-y:auto; }
+  #modal, #assign { position:fixed; inset:0; background:var(--dim); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
+  #modal .box, #assign .box { background:var(--sheet); border:1px solid color-mix(in srgb, var(--muted) 30%, transparent); box-shadow:0 12px 40px rgba(0,0,0,.45); border-radius:16px; padding:20px; max-width:400px; width:100%; box-sizing:border-box; max-height:100%; overflow-y:auto; }
   /* For someone else */
   #assign form.box { display:block; } /* not the side-by-side layout other forms use */
   #assign-people { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 16px; }
@@ -316,7 +317,8 @@
   </footer>
 </main>
 <script>
-  const VERSION = 13; // bump on every release so installed copies update themselves
+  const VERSION = 14; // whole number, bump on every release so installed copies update themselves (older copies only read whole numbers)
+  const VERSION_NAME = '13.1'; // what the footer shows
   const API = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://daily-checklist.danganhle99.workers.dev';
 
   // Home Screen apps can keep an old copy of this page for a long time. Ask GitHub for the latest
@@ -443,7 +445,7 @@
     $('note-text').placeholder = t('notePlaceholder');
     $('admin-name').placeholder = t('namePlaceholder');
     $('add-repeat').setAttribute('aria-label', t('repeat'));
-    $('ver').textContent = VERSION;
+    $('ver').textContent = VERSION_NAME;
     $('for-other').textContent = t('forOther');
     $('set-size').options[0].text = t('standard'); $('set-size').options[1].text = t('big');
   }
