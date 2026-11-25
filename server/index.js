@@ -17,13 +17,17 @@ const TEXT = {
         helpNewTitle: name => `📩 Help message from ${name}`, helpSolvedTitle: '✅ Your request was solved',
         helpSolvedBody: 'Please pull down to refresh the app so the changes take effect.',
         planBody: (time, date) => date ? `Was planned for ${date}, ${time}` : `Planned for ${time}`,
-        addedBy: name => `Added by ${name}`, stopHint: 'If you have finished this task, tick it in the app to stop receiving these notifications.' },
+        addedBy: name => `Added by ${name}`, stopHint: 'If you have finished this task, tick it in the app to stop receiving these notifications.',
+        sentTitle: name => `📩 ${name} sent you a task`,
+        sentBody: (text, when, isToday) => `${text} · ${when}. Check it out in ${isToday ? "today's list" : 'Upcoming'}.` },
   vi: { waterTitle: '💧 Đến giờ uống nước rồi', waterBody: 'Uống một cốc nước nhé.', summaryTitle: '📝 Việc chưa làm hôm nay', testTitle: 'Thông báo đã hoạt động ✓', testBody: 'Bạn sẽ nhận nhắc nhở ở đây.',
         morningTitle: '⏩ Đã chuyển sang hôm nay', morningBody: (from, yesterday, list) => `${from === yesterday ? 'Hôm qua' : 'Ngày ' + from} chưa xong: ${list}`,
         helpNewTitle: name => `📩 Tin nhắn trợ giúp từ ${name}`, helpSolvedTitle: '✅ Yêu cầu của bạn đã được giải quyết',
         helpSolvedBody: 'Hãy kéo xuống để làm mới ứng dụng và nhận thay đổi.',
         planBody: (time, date) => date ? `Đã hẹn ngày ${date}, ${time}` : `Hẹn lúc ${time}`,
-        addedBy: name => `Thêm bởi ${name}`, stopHint: 'Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.' },
+        addedBy: name => `Thêm bởi ${name}`, stopHint: 'Nếu bạn đã làm xong việc này, hãy đánh dấu ✓ trong ứng dụng để không nhận thông báo này nữa.',
+        sentTitle: name => `📩 ${name} đã gửi cho bạn một việc`,
+        sentBody: (text, when, isToday) => `${text} · ${when}. Xem trong ${isToday ? 'danh sách hôm nay' : 'mục Sắp tới'}.` },
 };
 
 export const defaultSettings = lang => ({
@@ -126,16 +130,17 @@ async function route(req, env) {
   if (m === 'POST' && p === '/plans') {
     const text = String(body.text || '').trim(), { date, time } = body;
     if (!text || text.length > 200 || !isDate(date) || !isTime(time)) throw new HttpError(400, 'bad-plan');
-    let target = me.id;
+    let target = me.id, them = null;
     if (body.for && body.for !== me.id) {
-      const them = await db.prepare('SELECT id FROM people WHERE id = ?').bind(String(body.for)).first();
+      them = await db.prepare('SELECT id, settings FROM people WHERE id = ?').bind(String(body.for)).first();
       if (!them) throw new HttpError(404, 'no-person');
       target = them.id;
     }
     const { n } = await db.prepare('SELECT COUNT(*) AS n FROM plans WHERE person_id = ? AND added = 0').bind(target).first();
     if (n >= MAX_PLANS) throw new HttpError(400, 'too-many-plans');
     if (await usage(db, target) + bytes(text) > USAGE_LIMIT) throw new HttpError(413, 'storage-full');
-    await db.prepare('INSERT INTO plans (person_id, by_id, text, date, time, created) VALUES (?, ?, ?, ?, ?, ?)').bind(target, me.id, text, date, time, Date.now()).run();
+    const added = await db.prepare('INSERT INTO plans (person_id, by_id, text, date, time, created) VALUES (?, ?, ?, ?, ?, ?)').bind(target, me.id, text, date, time, Date.now()).run();
+    if (them) await notify(env, them.id, sentTaskMessage(JSON.parse(them.settings), me.name, { id: added.meta.last_row_id, text, date, time }, new Date())); // tell them right away
     return waitingPlans(db, me.id);
   }
   if (m === 'DELETE' && p === '/plans') { // their own, or one they added for someone else
@@ -349,6 +354,14 @@ export function localNow(date, tz) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(date).map(x => [x.type, x.value]));
   return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: +parts.hour * 60 + +parts.minute };
+}
+
+// "dannyle sent you a task": sent the moment someone adds a task for another person (pure, so it can be tested).
+export function sentTaskMessage(settings, byName, plan, now) {
+  const t = TEXT[settings.lang], isToday = plan.date === localNow(now, settings.tz).date;
+  let day = plan.date;
+  try { day = new Date(plan.date + 'T12:00:00Z').toLocaleDateString(settings.lang === 'vi' ? 'vi-VN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }); } catch {}
+  return { title: t.sentTitle(byName), body: t.sentBody(plan.text, `${day}, ${plan.time}`, isToday), tag: 'sent-' + plan.id, ttl: 24 * 3600 };
 }
 
 // Which reminders are due for one person at this minute (pure, so it can be tested).

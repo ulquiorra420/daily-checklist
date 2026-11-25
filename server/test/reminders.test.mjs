@@ -1,6 +1,6 @@
 // Self-check for days/rollover, reminder timing, time zones and input cleaning.
 import assert from 'node:assert';
-import { dueReminders, defaultSettings, cleanSettings, cleanDay, localNow, newDay, fromOldFormat } from '../index.js';
+import { dueReminders, sentTaskMessage, defaultSettings, cleanSettings, cleanDay, localNow, newDay, fromOldFormat } from '../index.js';
 
 const T = (text, done = false, repeat = false) => ({ text, done, repeat });
 const person = (lang, tz, data, extra = {}, last = {}) =>
@@ -160,5 +160,17 @@ assert.throws(() => cleanDay({ tasks: [{ ...T('a'), by: 'x'.repeat(31) }], notes
 // ---- text size setting ----
 assert.strictEqual(cleanSettings({ textSize: 'big' }, base).textSize, 'big');
 assert.strictEqual(cleanSettings({ textSize: 'huge' }, base).textSize, undefined);
+
+// ---- "dannyle sent you a task": sent right away to the other person, in their language ----
+const enS = defaultSettings('en'), viS = defaultSettings('vi'); // both Asia/Ho_Chi_Minh
+const later = sentTaskMessage(enS, 'dannyle', { id: 5, text: 'Buy Groceries', date: '2026-11-28', time: '16:00' }, vnAt('10:00'));
+assert.strictEqual(later.title, '📩 dannyle sent you a task');
+assert.strictEqual(later.body, 'Buy Groceries · Sat, Nov 28, 16:00. Check it out in Upcoming.');
+assert.strictEqual(later.tag, 'sent-5');
+assert.strictEqual(sentTaskMessage(enS, 'dannyle', { id: 6, text: 'Call plumber', date: '2026-11-24', time: '16:00' }, vnAt('10:00')).body,
+  "Call plumber · Tue, Nov 24, 16:00. Check it out in today's list.");
+const vi = sentTaskMessage(viS, 'dannyle', { id: 5, text: 'Mua đồ', date: '2026-11-28', time: '16:00' }, vnAt('10:00'));
+assert.strictEqual(vi.title, '📩 dannyle đã gửi cho bạn một việc');
+assert.ok(vi.body.startsWith('Mua đồ · ') && vi.body.endsWith(', 16:00. Xem trong mục Sắp tới.'), vi.body);
 
 console.log('reminders + days OK');
